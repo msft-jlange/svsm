@@ -7,7 +7,6 @@
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::config::SvsmConfig;
 use crate::cpu::percpu::this_cpu_mut;
-use crate::elf;
 use crate::error::SvsmError;
 use crate::igvm_params::IgvmParams;
 use crate::mm;
@@ -18,6 +17,8 @@ use crate::sev::{pvalidate, PvalidateOp};
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
 use bootlib::kernel_launch::KernelLaunchInfo;
+
+use elf;
 
 struct IgvmParamInfo<'a> {
     virt_addr: VirtAddr,

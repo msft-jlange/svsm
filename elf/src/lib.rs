@@ -6,6 +6,7 @@
 //
 // vim: ts=4 sw=4 et
 
+#![no_std]
 extern crate alloc;
 
 use alloc::vec::Vec;
