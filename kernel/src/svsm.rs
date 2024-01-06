@@ -423,6 +423,9 @@ pub extern "C" fn svsm_main() {
     invalidate_early_boot_memory(&config, launch_info)
         .expect("Failed to invalidate early boot memory");
 
+    // Configure the #HV doorbell page as required.
+    PerCpu::configure_hv_doorbell().expect("Failed to configure #HV doorbell");
+
     let cpus = config.load_cpu_info().expect("Failed to load ACPI tables");
     let mut nr_cpus = 0;
 

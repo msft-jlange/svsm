@@ -9,6 +9,7 @@ extern crate alloc;
 use super::gdt_mut;
 use super::tss::{X86Tss, IST_DF};
 use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::cpu::ghcb::current_ghcb;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
@@ -25,8 +26,10 @@ use crate::mm::{
 };
 use crate::platform::SvsmPlatform;
 use crate::sev::ghcb::GHCB;
-use crate::sev::utils::RMPFlags;
+use crate::sev::hv_doorbell::HVDoorbell;
+use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
 use crate::sev::vmsa::allocate_new_vmsa;
+use crate::sev::RMPFlags;
 use crate::task::{schedule, schedule_task, RunQueue, Task, TaskPointer, WaitQueue};
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_FLAGS, SVSM_TSS};
 use crate::utils::MemoryRegion;
@@ -246,6 +249,7 @@ pub struct PerCpuUnsafe {
     shared: PerCpuShared,
     private: RefCell<PerCpu>,
     ghcb: *mut GHCB,
+    hv_doorbell: *mut HVDoorbell,
     init_stack: Option<VirtAddr>,
     ist: IstStacks,
 
@@ -260,6 +264,7 @@ impl PerCpuUnsafe {
             private: RefCell::new(PerCpu::new(apic_id, cpu_unsafe_ptr)),
             shared: PerCpuShared::new(),
             ghcb: ptr::null_mut(),
+            hv_doorbell: ptr::null_mut(),
             init_stack: None,
             ist: IstStacks::new(),
             current_stack: MemoryRegion::new(VirtAddr::null(), 0),
@@ -442,6 +447,52 @@ impl PerCpu {
         unsafe {
             let ghcb = (*self.cpu_unsafe).ghcb_unsafe();
             ghcb.as_ref().unwrap().register()
+        }
+    }
+
+    fn setup_hv_doorbell() -> Result<(), SvsmError> {
+        let paddr = allocate_zeroed_page()?;
+        let ghcb = &mut current_ghcb();
+        if let Err(e) = HVDoorbell::init(paddr, ghcb) {
+            free_page(paddr);
+            return Err(e);
+        }
+
+        unsafe {
+            let cpu_unsafe = this_cpu_unsafe();
+            (*cpu_unsafe).hv_doorbell = paddr.as_mut_ptr::<HVDoorbell>();
+        }
+
+        Ok(())
+    }
+
+    pub fn configure_hv_doorbell() -> Result<(), SvsmError> {
+        // #HV doorbell configuration is only required if this system will make
+        // use of restricted injection.
+        if hypervisor_ghcb_features().contains(GHCBHvFeatures::SEV_SNP_RESTR_INJ) {
+            Self::setup_hv_doorbell()
+        } else {
+            Ok(())
+        }
+    }
+
+    fn hv_doorbell(&self) -> Option<&'static HVDoorbell> {
+        unsafe {
+            let hv_doorbell = (*self.cpu_unsafe).hv_doorbell;
+            if hv_doorbell.is_null() {
+                None
+            } else {
+                // The HV doorbell page can only ever be borrowed shared, never
+                // mutable, and can safely have a static lifetime.
+                Some(&*hv_doorbell)
+            }
+        }
+    }
+
+    pub fn process_hv_events(&self) {
+        let hv_doorbell_ref = self.hv_doorbell();
+        if let Some(hv_doorbell) = hv_doorbell_ref {
+            hv_doorbell.process_events();
         }
     }
 

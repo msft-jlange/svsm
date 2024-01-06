@@ -116,6 +116,10 @@ fn check_requests() -> Result<bool, SvsmReqError> {
 
 pub fn request_loop() {
     loop {
+        // Ensure that all #HV events have been processed before returning
+        // to the guest.
+        this_cpu().process_hv_events();
+
         // Determine whether the guest is runnable.  If not, halt and wait for
         // the guest to execute.  When halting, assume that the hypervisor
         // will schedule the guest VMPL on its own.

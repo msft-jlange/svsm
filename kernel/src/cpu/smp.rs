@@ -70,6 +70,9 @@ fn start_ap() {
         .setup_idle_task(ap_request_loop)
         .expect("Failed to allocated idle task for AP");
 
+    // Configure the #HV doorbell page as required.
+    PerCpu::configure_hv_doorbell().expect("configure_hv_doorbell() failed");
+
     // Send a life-sign
     log::info!("AP with APIC-ID {} is online", this_cpu_mut().get_apic_id());
 
