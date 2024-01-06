@@ -30,8 +30,8 @@ use crate::platform::SvsmPlatform;
 use crate::sev::ghcb::GHCB;
 use crate::sev::hv_doorbell::HVDoorbell;
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
+use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::allocate_new_vmsa;
-use crate::sev::RMPFlags;
 use crate::task::{schedule, schedule_task, RunQueue, Task, TaskPointer, WaitQueue};
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_FLAGS, SVSM_TSS};
 use crate::utils::MemoryRegion;
@@ -675,8 +675,13 @@ impl PerCpu {
         let vaddr = allocate_new_vmsa(RMPFlags::GUEST_VMPL)?;
         let paddr = virt_to_phys(vaddr);
 
+        // Enable alternate injection if the hypervisor supports it.
+        if hypervisor_ghcb_features().contains(GHCBHvFeatures::SEV_SNP_EXT_INTERRUPTS) {
+            self.alternate_injection = true;
+        }
+
         let vmsa = vmsa_mut_ref_from_vaddr(vaddr);
-        init_guest_vmsa(vmsa, self.reset_ip);
+        init_guest_vmsa(vmsa, self.reset_ip, self.alternate_injection);
 
         self.shared().update_guest_vmsa(paddr);
 
