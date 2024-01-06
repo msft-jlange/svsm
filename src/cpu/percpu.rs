@@ -24,6 +24,7 @@ use crate::mm::{
     SVSM_PERCPU_TEMP_END_4K, SVSM_PERCPU_VMSA_BASE, SVSM_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
 };
 use crate::sev::ghcb::GHCB;
+use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
 use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::allocate_new_vmsa;
 use crate::task::RunQueue;
@@ -227,6 +228,7 @@ pub struct PerCpu {
     tss: X86Tss,
     svsm_vmsa: Option<VmsaRef>,
     reset_ip: u64,
+    alternate_injection: bool,
 
     /// PerCpu Virtual Memory Range
     vm_range: VMR,
@@ -257,6 +259,7 @@ impl PerCpu {
             vrange_4k: VirtualRange::new(),
             vrange_2m: VirtualRange::new(),
             runqueue: RWLock::new(RunQueue::new(apic_id)),
+            alternate_injection: false,
         }
     }
 
@@ -512,8 +515,13 @@ impl PerCpu {
         let vaddr = allocate_new_vmsa(RMPFlags::GUEST_VMPL)?;
         let paddr = virt_to_phys(vaddr);
 
+        // Enable alternate injection if the hypervisor supports it.
+        if hypervisor_ghcb_features().contains(GHCBHvFeatures::SEV_SNP_ALTERNATE_INJ) {
+            self.alternate_injection = true;
+        }
+
         let vmsa = vmsa_mut_ref_from_vaddr(vaddr);
-        init_guest_vmsa(vmsa, self.reset_ip);
+        init_guest_vmsa(vmsa, self.reset_ip, self.alternate_injection);
 
         self.shared.update_guest_vmsa(paddr);
 
