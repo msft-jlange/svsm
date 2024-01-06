@@ -14,7 +14,7 @@ use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
 use crate::error::SvsmError;
 use crate::locking::{LockGuard, RWLock, SpinLock};
-use crate::mm::alloc::{allocate_page, allocate_zeroed_page};
+use crate::mm::alloc::{allocate_page, allocate_zeroed_page, free_page};
 use crate::mm::pagetable::{get_init_pgtable_locked, PTEntryFlags, PageTableRef};
 use crate::mm::virtualrange::VirtualRange;
 use crate::mm::vm::{Mapping, VMKernelStack, VMPhysMem, VMRMapping, VMReserved, VMR};
@@ -24,6 +24,7 @@ use crate::mm::{
     SVSM_PERCPU_TEMP_END_4K, SVSM_PERCPU_VMSA_BASE, SVSM_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
 };
 use crate::sev::ghcb::GHCB;
+use crate::sev::hv_doorbell::HVDoorbell;
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
 use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::allocate_new_vmsa;
@@ -223,6 +224,7 @@ pub struct PerCpu {
     apic_id: u32,
     pgtbl: SpinLock<PageTableRef>,
     ghcb: *mut GHCB,
+    hv_doorbell: *mut HVDoorbell,
     init_stack: Option<VirtAddr>,
     ist: IstStacks,
     tss: X86Tss,
@@ -250,6 +252,7 @@ impl PerCpu {
             apic_id,
             pgtbl: SpinLock::<PageTableRef>::new(PageTableRef::unset()),
             ghcb: ptr::null_mut(),
+            hv_doorbell: ptr::null_mut(),
             init_stack: None,
             ist: IstStacks::new(),
             tss: X86Tss::new(),
@@ -344,6 +347,31 @@ impl PerCpu {
 
     pub fn register_ghcb(&self) -> Result<(), SvsmError> {
         unsafe { self.ghcb.as_ref().unwrap().register() }
+    }
+
+    fn setup_hv_doorbell(&mut self) -> Result<(), SvsmError> {
+        let phys_page = allocate_page()?;
+        self.hv_doorbell = phys_page.as_mut_ptr::<HVDoorbell>();
+        let ghcb = self.ghcb();
+        let e = unsafe { (*self.hv_doorbell).init(ghcb) };
+
+        // If initialization failed, then clear the pointer and free the page.
+        if e.is_err() {
+            self.hv_doorbell = ptr::null_mut();
+            free_page(phys_page);
+            return e;
+        }
+        Ok(())
+    }
+
+    pub fn configure_hv_doorbell(&mut self) -> Result<(), SvsmError> {
+        // #HV doorbell configuration is only required if this system will make
+        // use of alternate injection.
+        if hypervisor_ghcb_features().contains(GHCBHvFeatures::SEV_SNP_ALTERNATE_INJ) {
+            self.setup_hv_doorbell()
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_top_of_stack(&self) -> VirtAddr {

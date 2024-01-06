@@ -61,6 +61,11 @@ fn start_ap() {
         .setup_on_cpu()
         .expect("setup_on_cpu() failed");
 
+    // Configure the #HV doorbell page as required.
+    this_cpu_mut()
+        .configure_hv_doorbell()
+        .expect("configure_hv_doorbell() failed");
+
     // Send a life-sign
     log::info!("AP with APIC-ID {} is online", this_cpu_mut().get_apic_id());
 
