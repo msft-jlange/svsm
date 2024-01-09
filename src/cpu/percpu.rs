@@ -581,6 +581,12 @@ impl PerCpu {
         Some(SVSM_PERCPU_CAA_BASE + offset)
     }
 
+    pub fn update_apic_emulation(&mut self, vmsa: &mut VMSA) {
+        if self.alternate_injection {
+            self.apic.borrow_mut().present_interrupts(vmsa);
+        }
+    }
+
     fn vmsa_tr_segment(&self) -> VMSASegment {
         VMSASegment {
             selector: SVSM_TSS,

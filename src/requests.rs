@@ -78,6 +78,9 @@ pub fn request_loop() {
         let vmsa = if update_mappings().is_ok() {
             let vmsa = this_cpu_mut().guest_vmsa();
 
+            // Update APIC interrupt emulation state if required.
+            this_cpu_mut().update_apic_emulation(vmsa);
+
             // Make VMSA runnable again by setting EFER.SVME
             vmsa.enable();
 
