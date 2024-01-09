@@ -4,6 +4,7 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+pub mod apic;
 pub mod control_regs;
 pub mod cpuid;
 pub mod efer;
@@ -11,6 +12,7 @@ pub mod extable;
 pub mod features;
 pub mod gdt;
 pub mod ghcb;
+pub mod guest_state;
 pub mod idt;
 pub mod insn;
 pub mod msr;
@@ -22,7 +24,9 @@ pub mod tss;
 pub mod vc;
 pub mod vmsa;
 
+pub use apic::LocalApic;
 pub use gdt::{gdt, gdt_mut};
+pub use guest_state::GuestCpuState;
 pub use idt::common::X86ExceptionContext;
 pub use registers::{X86GeneralRegs, X86InterruptFrame, X86SegmentRegs};
 pub use tlb::*;

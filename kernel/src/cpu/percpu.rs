@@ -13,6 +13,7 @@ use crate::cpu::ghcb::current_ghcb;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
+use crate::cpu::LocalApic;
 use crate::error::SvsmError;
 use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::alloc::{allocate_zeroed_page, free_page};
@@ -338,6 +339,7 @@ pub struct PerCpu {
     tss: X86Tss,
     svsm_vmsa: Option<VmsaRef>,
     reset_ip: u64,
+    alternate_injection: bool,
 
     /// PerCpu Virtual Memory Range
     vm_range: VMR,
@@ -352,6 +354,9 @@ pub struct PerCpu {
 
     /// WaitQueue for request processing
     request_waitqueue: WaitQueue,
+
+    /// Local APIC state for APIC emulation
+    apic: RefCell<LocalApic>,
 }
 
 impl PerCpu {
@@ -367,6 +372,8 @@ impl PerCpu {
             vrange_2m: VirtualRange::new(),
             runqueue: RWLock::new(RunQueue::new()),
             request_waitqueue: WaitQueue::new(),
+            alternate_injection: false,
+            apic: RefCell::new(LocalApic::new()),
         }
     }
 
@@ -683,6 +690,12 @@ impl PerCpu {
         self.vm_range.insert_at(SVSM_PERCPU_CAA_BASE, caa_mapping)?;
 
         Ok(())
+    }
+
+    pub fn update_apic_emulation(&self, vmsa: &mut VMSA) {
+        if self.alternate_injection {
+            self.apic.borrow_mut().present_interrupts(vmsa);
+        }
     }
 
     fn vmsa_tr_segment(&self) -> VMSASegment {
