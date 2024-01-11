@@ -10,6 +10,7 @@ use crate::acpi::tables::ACPICPUInfo;
 use crate::cpu::percpu::{this_cpu, this_cpu_mut, PerCpu};
 use crate::cpu::vmsa::init_svsm_vmsa;
 use crate::requests::request_loop;
+use crate::sev::vmsa::VMSAControl;
 use crate::task::{create_task, TASK_FLAG_SHARE_PT};
 
 fn start_cpu(apic_id: u32) {
