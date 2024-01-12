@@ -173,6 +173,12 @@ impl GuestVmsaRef {
     pub fn caa_phys(&self) -> Option<PhysAddr> {
         self.caa
     }
+
+    pub fn vmsa(&mut self) -> &mut VMSA {
+        assert!(self.vmsa.is_some());
+        assert!(self.gen_in_use == self.generation);
+        unsafe { SVSM_PERCPU_VMSA_BASE.as_mut_ptr::<VMSA>().as_mut().unwrap() }
+    }
 }
 
 #[derive(Debug)]
@@ -498,14 +504,6 @@ impl PerCpu {
 
     pub fn guest_vmsa_ref(&self) -> LockGuard<GuestVmsaRef> {
         self.shared.guest_vmsa.lock()
-    }
-
-    pub fn guest_vmsa(&mut self) -> &mut VMSA {
-        let locked = self.shared.guest_vmsa.lock();
-
-        assert!(locked.vmsa_phys().is_some());
-
-        unsafe { SVSM_PERCPU_VMSA_BASE.as_mut_ptr::<VMSA>().as_mut().unwrap() }
     }
 
     pub fn alloc_guest_vmsa(&mut self) -> Result<(), SvsmError> {
