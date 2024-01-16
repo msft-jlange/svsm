@@ -8,6 +8,22 @@ use crate::cpu::GuestCpuState;
 
 use cpuarch::vmsa::VMSA;
 
+const APIC_REGISTER_APIC_ID: u64 = 0x802;
+const APIC_REGISTER_TPR: u64 = 0x808;
+const APIC_REGISTER_PPR: u64 = 0x80A;
+const APIC_REGISTER_EOI: u64 = 0x80B;
+const APIC_REGISTER_ISR_0: u64 = 0x810;
+const APIC_REGISTER_ISR_7: u64 = 0x817;
+const APIC_REGISTER_IRR_0: u64 = 0x820;
+const APIC_REGISTER_IRR_7: u64 = 0x827;
+const APIC_REGISTER_ICR: u64 = 0x830;
+const APIC_REGISTER_SELF_IPI: u64 = 0x83F;
+
+#[derive(Clone, Copy, Debug)]
+pub enum ApicError {
+    ApicError,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct LocalApic {
     apic_id: u32,
@@ -147,6 +163,68 @@ impl LocalApic {
         if self.isr_stack_index != 0 {
             self.isr_stack_index -= 1;
             self.update_required = true;
+        }
+    }
+
+    fn get_isr(&self, index: usize) -> u32 {
+        let mut value = 0;
+        for i in 0..self.isr_stack_index {
+            if (usize::from(self.isr_stack[i] >> 5)) == index {
+                value |= 1 << (self.isr_stack[i] & 0x1F)
+            }
+        }
+        value
+    }
+
+    pub fn read_register<T: GuestCpuState>(
+        &mut self,
+        cpu_state: &T,
+        register: u64,
+    ) -> Result<u64, ApicError> {
+        match register {
+            APIC_REGISTER_APIC_ID => Ok(u64::from(self.apic_id)),
+            APIC_REGISTER_IRR_0..=APIC_REGISTER_IRR_7 => {
+                let offset = register - APIC_REGISTER_IRR_0;
+                let index: usize = offset.try_into().unwrap();
+                Ok(self.irr[index] as u64)
+            }
+            APIC_REGISTER_ISR_0..=APIC_REGISTER_ISR_7 => {
+                let offset = register - APIC_REGISTER_IRR_0;
+                Ok(self.get_isr(offset.try_into().unwrap()) as u64)
+            }
+            APIC_REGISTER_TPR => {
+                Ok(cpu_state.get_tpr() as u64)
+            }
+            APIC_REGISTER_PPR => {
+                Ok(self.get_ppr(cpu_state) as u64)
+            }
+            _ => Err(ApicError::ApicError),
+        }
+    }
+
+    pub fn write_register<T: GuestCpuState>(
+        &mut self,
+        cpu_state: &mut T,
+        register: u64,
+        value: u64,
+    ) -> Result<(), ApicError> {
+        match register {
+            APIC_REGISTER_TPR => {
+                // TPR must be an 8-bit value.
+                if value > 0xFF {
+                    Err(ApicError::ApicError)
+                } else {
+                    cpu_state.set_tpr((value & 0xFF) as u8);
+                    Ok(())
+                }
+            },
+            APIC_REGISTER_EOI => {
+                self.perform_eoi();
+                Ok(())
+            },
+            APIC_REGISTER_ICR => Err(ApicError::ApicError),
+            APIC_REGISTER_SELF_IPI => Err(ApicError::ApicError),
+            _ => Err(ApicError::ApicError),
         }
     }
 }

@@ -4,6 +4,7 @@
 //
 // Author: Dov Murik <dovmurik@linux.ibm.com>
 
+pub mod apic;
 pub mod core;
 pub mod errors;
 

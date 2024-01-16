@@ -9,6 +9,7 @@ extern crate alloc;
 use super::gdt::load_tss;
 use super::tss::{X86Tss, IST_DF};
 use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::cpu::apic::ApicError;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
@@ -585,6 +586,18 @@ impl PerCpu {
         if self.alternate_injection {
             self.apic.borrow_mut().present_interrupts(vmsa);
         }
+    }
+
+    pub fn read_apic_register(&mut self, register: u64) -> Result<u64, ApicError> {
+        let vmsa = self.guest_vmsa();
+        self.apic.borrow_mut().read_register(vmsa, register)
+    }
+
+    pub fn write_apic_register(&mut self, register: u64, value: u64) -> Result<(), ApicError> {
+        let vmsa = self.guest_vmsa();
+        let apic_ref = &self.apic;
+        let mut apic = apic_ref.borrow_mut();
+        apic.write_register(vmsa, register, value)
     }
 
     fn vmsa_tr_segment(&self) -> VMSASegment {
