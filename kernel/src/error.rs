@@ -61,4 +61,6 @@ pub enum SvsmError {
     Vc(VcError),
     /// The operation is not supported.
     NotSupported,
+    /// Generic errors related to APIC emulation.
+    Apic,
 }
