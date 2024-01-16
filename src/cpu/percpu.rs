@@ -12,6 +12,7 @@ use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
+use crate::cpu::LocalApic;
 use crate::error::SvsmError;
 use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::alloc::{allocate_page, allocate_zeroed_page, free_page};
@@ -32,7 +33,7 @@ use crate::task::RunQueue;
 use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_FLAGS, SVSM_TSS};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
+use core::cell::{RefCell, UnsafeCell};
 use core::mem::size_of;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -221,7 +222,6 @@ impl PerCpuShared {
 pub struct PerCpu {
     pub shared: &'static PerCpuShared,
     online: AtomicBool,
-    apic_id: u32,
     pgtbl: SpinLock<PageTableRef>,
     ghcb: *mut GHCB,
     hv_doorbell: *mut HVDoorbell,
@@ -242,6 +242,9 @@ pub struct PerCpu {
 
     /// Task list that has been assigned for scheduling on this CPU
     runqueue: RWLock<RunQueue>,
+
+    /// Local APIC state for APIC emulation
+    apic: RefCell<LocalApic>,
 }
 
 impl PerCpu {
@@ -249,7 +252,6 @@ impl PerCpu {
         PerCpu {
             shared,
             online: AtomicBool::new(false),
-            apic_id,
             pgtbl: SpinLock::<PageTableRef>::new(PageTableRef::unset()),
             ghcb: ptr::null_mut(),
             hv_doorbell: ptr::null_mut(),
@@ -263,6 +265,7 @@ impl PerCpu {
             vrange_2m: VirtualRange::new(),
             runqueue: RWLock::new(RunQueue::new(apic_id)),
             alternate_injection: false,
+            apic: RefCell::new(LocalApic::new(apic_id)),
         }
     }
 
@@ -297,8 +300,8 @@ impl PerCpu {
         self.online.load(Ordering::Acquire)
     }
 
-    pub const fn get_apic_id(&self) -> u32 {
-        self.apic_id
+    pub fn get_apic_id(&self) -> u32 {
+        self.apic.borrow().get_apic_id()
     }
 
     fn allocate_page_table(&mut self) -> Result<(), SvsmError> {
@@ -513,13 +516,13 @@ impl PerCpu {
     }
 
     pub fn unmap_guest_vmsa(&self) {
-        assert!(self.apic_id == this_cpu().get_apic_id());
+        assert!(self.apic.borrow().get_apic_id() == this_cpu().get_apic_id());
         // Ignore errors - the mapping might or might not be there
         let _ = self.vm_range.remove(SVSM_PERCPU_VMSA_BASE);
     }
 
     pub fn map_guest_vmsa(&self, paddr: PhysAddr) -> Result<(), SvsmError> {
-        assert!(self.apic_id == this_cpu().get_apic_id());
+        assert!(self.apic.borrow().get_apic_id() == this_cpu().get_apic_id());
         let vmsa_mapping = Arc::new(VMPhysMem::new_mapping(paddr, PAGE_SIZE, true));
         self.vm_range
             .insert_at(SVSM_PERCPU_VMSA_BASE, vmsa_mapping)?;

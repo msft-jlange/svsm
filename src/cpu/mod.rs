@@ -4,6 +4,7 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+pub mod apic;
 pub mod control_regs;
 pub mod cpuid;
 pub mod efer;
@@ -21,6 +22,7 @@ pub mod tss;
 pub mod vc;
 pub mod vmsa;
 
+pub use apic::LocalApic;
 pub use idt::common::X86ExceptionContext;
 pub use registers::{X86GeneralRegs, X86InterruptFrame, X86SegmentRegs};
 pub use tlb::*;
