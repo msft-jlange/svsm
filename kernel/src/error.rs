@@ -44,6 +44,8 @@ pub enum SvsmError {
     FwCfg(FwCfgError),
     // Errors related to ACPI parsing.
     Acpi,
+    // Generic errors related to APIC emulation.
+    Apic,
     // Errors from file systems
     FileSystem(FsError),
     // Task management errors,
