@@ -373,10 +373,11 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     log::info!("BSP Runtime stack starts @ {:#018x}", bp);
 
     // Create the root task that runs the entry point then handles the request loop
+    let apic_id = this_cpu().get_apic_id();
     create_task(
         svsm_main,
         TASK_FLAG_SHARE_PT,
-        Some(this_cpu().get_apic_id()),
+        Some(apic_id),
     )
     .expect("Failed to create initial task");
 
