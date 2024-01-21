@@ -8,6 +8,7 @@ use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::flush_tlb_global_sync;
 use crate::cpu::percpu::{this_cpu_mut, PERCPU_AREAS, PERCPU_VMSAS};
 use crate::cpu::vmsa::{vmsa_mut_ref_from_vaddr, vmsa_ref_from_vaddr};
+use crate::cpu::ghcb::current_ghcb;
 use crate::error::SvsmError;
 use crate::mm::virtualrange::{VIRT_ALIGN_2M, VIRT_ALIGN_4K};
 use crate::mm::PerCPUPageMappingGuard;
@@ -21,6 +22,8 @@ use crate::sev::utils::{
 use crate::types::{PageSize, PAGE_SIZE, PAGE_SIZE_2M};
 use crate::utils::zero_mem_region;
 use cpuarch::vmsa::VMSA;
+
+use core::arch::asm;
 
 const SVSM_REQ_CORE_REMAP_CA: u32 = 0;
 const SVSM_REQ_CORE_PVALIDATE: u32 = 1;
@@ -275,6 +278,9 @@ fn core_pvalidate(params: &RequestParams) -> Result<(), SvsmReqError> {
     }
 
     let paddr = gpa.page_align();
+    if u64::from(paddr) != 0 {
+        panic!("wtf");
+    }
     let offset = gpa.page_offset();
 
     let guard = PerCPUPageMappingGuard::create_4k(paddr)?;
@@ -349,6 +355,9 @@ fn core_remap_ca(params: &RequestParams) -> Result<(), SvsmReqError> {
 }
 
 pub fn core_protocol_request(request: u32, params: &mut RequestParams) -> Result<(), SvsmReqError> {
+    let ghcb = current_ghcb();
+    log::info!("ghcb {:?} acquired", ghcb);
+    unsafe {asm! ("int 30h")}
     match request {
         SVSM_REQ_CORE_REMAP_CA => core_remap_ca(params),
         SVSM_REQ_CORE_PVALIDATE => core_pvalidate(params),

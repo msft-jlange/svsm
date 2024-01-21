@@ -8,6 +8,7 @@ use crate::cpu::percpu::this_cpu_unsafe;
 use crate::sev::ghcb::GHCB;
 
 use core::ops::{Deref, DerefMut};
+use core::arch::asm;
 use core::ptr;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -93,8 +94,11 @@ pub fn nested_ghcb(level: GHCBNestingLevel) -> GHCBRef {
         // Recursive borrowing is allowable if the the new nesting level is
         // strictly higher than the old level.
         let was_borrowed = ghcb_state.borrowed;
-        if was_borrowed && level <= previous_level {
-            panic!("GHCB borrowed recursively");
+        if was_borrowed {
+            if level <= previous_level {
+                panic!("GHCB borrowed recursively");
+            }
+            asm!("int 3");
         }
         ghcb_state.borrowed = true;
         ghcb_state.nesting_level = level;
