@@ -8,6 +8,9 @@ use core::arch::asm;
 use core::fmt::Debug;
 
 pub trait IOPort: Sync + Debug {
+    fn begin_io(&self) {}
+    fn end_io(&self) {}
+
     fn outb(&self, port: u16, value: u8) {
         unsafe { asm!("outb %al, %dx", in("al") value, in("dx") port, options(att_syntax)) }
     }

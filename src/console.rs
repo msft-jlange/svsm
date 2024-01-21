@@ -5,6 +5,7 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::locking::SpinLock;
+use crate::serial::TerminalBinding;
 use crate::serial::{Terminal, DEFAULT_SERIAL_PORT};
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 use core::fmt;
@@ -24,8 +25,9 @@ impl Console {
 impl fmt::Write for Console {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         if let Some(writer) = self.writer {
+            let term = TerminalBinding::begin_io(writer);
             for ch in s.bytes() {
-                writer.put_byte(ch);
+                term.put_byte(ch);
             }
         }
 

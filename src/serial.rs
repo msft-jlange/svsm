@@ -6,6 +6,8 @@
 
 use super::io::{IOPort, DEFAULT_IO_DRIVER};
 
+use core::fmt;
+
 pub const SERIAL_PORT: u16 = 0x3f8;
 const BAUD: u32 = 9600;
 const DLAB: u8 = 0x80;
@@ -25,7 +27,44 @@ pub const DLH: u16 = 1; // Divisor Latch High
 pub const RCVRDY: u8 = 0x01;
 pub const XMTRDY: u8 = 0x20;
 
+pub struct TerminalBinding<'a> {
+    terminal: &'a dyn Terminal,
+}
+
+impl TerminalBinding<'_> {
+    pub fn begin_io(terminal: &dyn Terminal) -> TerminalBinding {
+        terminal.begin_io();
+        TerminalBinding { terminal }
+    }
+
+    pub fn put_byte(&self, ch: u8) {
+        self.terminal.put_byte(ch)
+    }
+    pub fn get_byte(&self) -> u8 {
+        self.terminal.get_byte()
+    }
+}
+
+impl Drop for TerminalBinding<'_> {
+    fn drop(&mut self) {
+        self.terminal.end_io()
+    }
+}
+
+impl fmt::Debug for TerminalBinding<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TerminalBinding")
+            .field(
+                "terminal",
+                &format_args!("{:?}", self.terminal as *const dyn Terminal),
+            )
+            .finish()
+    }
+}
+
 pub trait Terminal: Sync {
+    fn begin_io(&self) {}
+    fn end_io(&self) {}
     fn put_byte(&self, _ch: u8) {}
     fn get_byte(&self) -> u8 {
         0
@@ -62,6 +101,14 @@ impl<'a> SerialPort<'a> {
 }
 
 impl<'a> Terminal for SerialPort<'a> {
+    fn begin_io(&self) {
+        self.driver.begin_io()
+    }
+
+    fn end_io(&self) {
+        self.driver.end_io()
+    }
+
     fn put_byte(&self, ch: u8) {
         let driver = &self.driver;
         let port = self.port;

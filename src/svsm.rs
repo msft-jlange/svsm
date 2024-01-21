@@ -374,12 +374,8 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 
     // Create the root task that runs the entry point then handles the request loop
     let apic_id = this_cpu().get_apic_id();
-    create_task(
-        svsm_main,
-        TASK_FLAG_SHARE_PT,
-        Some(apic_id),
-    )
-    .expect("Failed to create initial task");
+    create_task(svsm_main, TASK_FLAG_SHARE_PT, Some(apic_id))
+        .expect("Failed to create initial task");
 
     panic!("SVSM entry point terminated unexpectedly");
 }
