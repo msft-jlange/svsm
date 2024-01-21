@@ -9,9 +9,9 @@ extern crate alloc;
 use super::gdt_mut;
 use super::tss::{X86Tss, IST_DF};
 use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::cpu::ghcb::GHCBState;
 use crate::cpu::tss::TSS_LIMIT;
-use crate::cpu::vmsa::init_guest_vmsa;
-use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
+use crate::cpu::vmsa::{init_guest_vmsa, vmsa_mut_ref_from_vaddr};
 use crate::error::SvsmError;
 use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::alloc::{allocate_zeroed_page, free_page};
@@ -36,7 +36,6 @@ use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 use core::mem::size_of;
 use core::ops::{Deref, DerefMut};
-use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use cpuarch::vmsa::{VMSASegment, VMSA};
 
@@ -240,7 +239,7 @@ pub struct PerCpu {
     online: AtomicBool,
     apic_id: u32,
     pgtbl: SpinLock<PageTableRef>,
-    ghcb: *mut GHCB,
+    ghcb_state: GHCBState,
     init_stack: Option<VirtAddr>,
     ist: IstStacks,
     tss: X86Tss,
@@ -277,7 +276,7 @@ impl PerCpu {
             online: AtomicBool::new(false),
             apic_id,
             pgtbl: SpinLock::<PageTableRef>::new(PageTableRef::unset()),
-            ghcb: ptr::null_mut(),
+            ghcb_state: GHCBState::new(),
             init_stack: None,
             ist: IstStacks::new(),
             tss: X86Tss::new(),
@@ -377,12 +376,13 @@ impl PerCpu {
             free_page(ghcb_page);
             return Err(e);
         };
-        self.ghcb = ghcb_page.as_mut_ptr();
+        self.ghcb_state.set_ghcb_ptr(ghcb_page.as_mut_ptr());
         Ok(())
     }
 
     pub fn register_ghcb(&self) -> Result<(), SvsmError> {
-        unsafe { self.ghcb.as_ref().unwrap().register() }
+        let ghcb_ptr = self.ghcb_state.ghcb_ptr();
+        unsafe { ghcb_ptr.as_ref().unwrap().register() }
     }
 
     pub fn get_top_of_stack(&self) -> VirtAddr {
@@ -486,19 +486,20 @@ impl PerCpu {
     }
 
     pub fn shutdown(&mut self) -> Result<(), SvsmError> {
-        if self.ghcb.is_null() {
+        let ghcb_ptr = self.ghcb_state.ghcb_ptr();
+        if ghcb_ptr.is_null() {
             return Ok(());
         }
 
-        unsafe { (*self.ghcb).shutdown() }
+        unsafe { (*ghcb_ptr).shutdown() }
     }
 
     pub fn set_reset_ip(&mut self, reset_ip: u64) {
         self.reset_ip = reset_ip;
     }
 
-    pub fn ghcb_unsafe(&mut self) -> *mut GHCB {
-        self.ghcb
+    pub fn ghcb_state(&mut self) -> *mut GHCBState {
+        &mut self.ghcb_state
     }
 
     pub fn alloc_svsm_vmsa(&mut self) -> Result<(), SvsmError> {
