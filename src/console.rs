@@ -29,6 +29,7 @@ impl fmt::Write for Console {
             for ch in s.bytes() {
                 term.put_byte(ch);
             }
+            writer.end_io();
         }
 
         Ok(())

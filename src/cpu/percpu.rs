@@ -234,6 +234,12 @@ pub struct PerCpu {
     svsm_vmsa: Option<VmsaRef>,
     reset_ip: u64,
 
+    /// GHCB Nesting information
+    #[cfg(dbg_assertions)]
+    ghcb_consumer: GHCBConsumer,
+    #[cfg(dbg_assertions)]
+    ghcb_nesting_reference: bool,
+
     /// PerCpu Virtual Memory Range
     vm_range: VMR,
 
@@ -604,12 +610,16 @@ impl PerCpu {
     }
 }
 
+pub unsafe fn this_cpu_unsafe() -> &'static mut PerCpu {
+    SVSM_PERCPU_BASE.as_mut_ptr::<PerCpu>().as_mut().unwrap()
+}
+
 pub fn this_cpu() -> &'static PerCpu {
     unsafe { SVSM_PERCPU_BASE.as_ptr::<PerCpu>().as_ref().unwrap() }
 }
 
 pub fn this_cpu_mut() -> &'static mut PerCpu {
-    unsafe { SVSM_PERCPU_BASE.as_mut_ptr::<PerCpu>().as_mut().unwrap() }
+    unsafe { this_cpu_unsafe() }
 }
 
 #[derive(Debug, Clone, Copy)]
