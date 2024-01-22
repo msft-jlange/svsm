@@ -40,6 +40,9 @@ use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use cpuarch::vmsa::{VMSASegment, VMSA};
 
+#[cfg(debug_assertions)]
+use core::arch::asm;
+
 #[derive(Debug)]
 struct PerCpuInfo {
     apic_id: u32,
@@ -680,13 +683,20 @@ impl DerefMut for CpuRefMut {
     }
 }
 
+#[cfg(debug_assertions)]
+fn local_assert(test: bool) {
+    if !test {
+        unsafe { asm!("int 3") };
+    }
+}
+
 pub fn this_cpu() -> CpuRef {
     unsafe {
         let cpu = SVSM_PERCPU_BASE.as_mut_ptr::<PerCpu>();
         #[cfg(debug_assertions)]
         {
             // Prohibit a shared borrow if a mutable borrow exists.
-            assert!((*cpu).borrow_count.1 == 0);
+            local_assert((*cpu).borrow_count.1 == 0);
             (*cpu).borrow_count.0 += 1;
         }
         CpuRef { cpu: &mut *cpu }
@@ -699,8 +709,8 @@ pub fn this_cpu_mut() -> CpuRefMut {
         #[cfg(debug_assertions)]
         {
             // Prohibit a mutable borrow if any other borrow exists.
-            assert!((*cpu).borrow_count.0 == 0);
-            assert!((*cpu).borrow_count.1 == 0);
+            local_assert((*cpu).borrow_count.0 == 0);
+            local_assert((*cpu).borrow_count.1 == 0);
             (*cpu).borrow_count.0 += 1;
             (*cpu).borrow_count.1 += 1;
         }
@@ -711,7 +721,7 @@ pub fn this_cpu_mut() -> CpuRefMut {
 #[cfg(debug_assertions)]
 impl Drop for CpuRef {
     fn drop(&mut self) {
-        assert!(self.cpu.borrow_count.0 != 0);
+        local_assert(self.cpu.borrow_count.0 != 0);
         self.cpu.borrow_count.0 -= 1;
     }
 }
@@ -719,9 +729,9 @@ impl Drop for CpuRef {
 #[cfg(debug_assertions)]
 impl Drop for CpuRefMut {
     fn drop(&mut self) {
-        assert!(self.cpu.borrow_count.0 == 1);
+        local_assert(self.cpu.borrow_count.0 == 1);
         self.cpu.borrow_count.0 = 0;
-        assert!(self.cpu.borrow_count.1 == 1);
+        local_assert(self.cpu.borrow_count.1 == 1);
         self.cpu.borrow_count.1 = 0;
     }
 }
