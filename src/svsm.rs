@@ -205,7 +205,8 @@ fn prepare_fw_launch(fw_meta: &SevFWMetaData) -> Result<(), SvsmError> {
 }
 
 fn launch_fw(config: &SvsmConfig) -> Result<(), SvsmError> {
-    let mut vmsa_ref = this_cpu().guest_vmsa_ref();
+    let cpu = this_cpu_mut();
+    let mut vmsa_ref = cpu.guest_vmsa_ref();
     let vmsa_pa = vmsa_ref.vmsa_phys().unwrap();
     let vmsa = vmsa_ref.vmsa();
 
@@ -214,10 +215,10 @@ fn launch_fw(config: &SvsmConfig) -> Result<(), SvsmError> {
     log::info!("VMSA PA: {:#x}", vmsa_pa);
 
     let sev_features = vmsa.sev_features;
+    drop(vmsa_ref);
 
     log::info!("Launching Firmware");
-    this_cpu_mut()
-        .ghcb()
+    cpu.ghcb()
         .register_guest_vmsa(vmsa_pa, 0, GUEST_VMPL as u64, sev_features)?;
 
     Ok(())
