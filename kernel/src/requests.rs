@@ -27,7 +27,8 @@ use cpuarch::vmsa::GuestVMExit;
 pub struct SvsmCaa {
     call_pending: u8,
     mem_available: u8,
-    _rsvd: [u8; 6],
+    pub lazy_eoi_pending: u8,
+    _rsvd: [u8; 5],
 }
 
 impl SvsmCaa {
@@ -40,13 +41,23 @@ impl SvsmCaa {
         }
     }
 
+    /// Returns a copy of the this CAA with the `lazy_eoi` flag updated
+    #[inline]
+    pub const fn update_lazy_eoi_pending(self, lazy_eoi_pending: u8) -> Self {
+        Self {
+            lazy_eoi_pending,
+            ..self
+        }
+    }
+
     /// A CAA with all of its fields set to zero.
     #[inline]
     pub const fn zeroed() -> Self {
         Self {
             call_pending: 0,
             mem_available: 0,
-            _rsvd: [0; 6],
+            lazy_eoi_pending: 0,
+            _rsvd: [0; 5],
         }
     }
 }
@@ -133,10 +144,11 @@ pub fn request_loop() {
             {
                 let cpu = this_cpu();
                 let mut vmsa_ref = cpu.guest_vmsa_ref();
+                let caa_addr = vmsa_ref.caa_addr();
                 let vmsa = vmsa_ref.vmsa();
 
                 // Update APIC interrupt emulation state if required.
-                cpu.update_apic_emulation(vmsa);
+                cpu.update_apic_emulation(vmsa, caa_addr);
 
                 // Make VMSA runnable again by setting EFER.SVME
                 vmsa.enable();

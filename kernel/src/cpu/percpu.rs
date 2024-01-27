@@ -701,9 +701,20 @@ impl PerCpu {
         self.alternate_injection
     }
 
-    pub fn update_apic_emulation(&self, vmsa: &mut VMSA) {
+    pub fn clear_pending_interrupts(&self) {
         if self.alternate_injection {
-            self.apic.borrow_mut().present_interrupts(vmsa);
+            let mut vmsa_ref = self.guest_vmsa_ref();
+            let caa_addr = vmsa_ref.caa_addr();
+            let vmsa = vmsa_ref.vmsa();
+            self.apic
+                .borrow_mut()
+                .check_delivered_interrupts(vmsa, caa_addr);
+        }
+    }
+
+    pub fn update_apic_emulation(&self, vmsa: &mut VMSA, caa_addr: Option<VirtAddr>) {
+        if self.alternate_injection {
+            self.apic.borrow_mut().present_interrupts(vmsa, caa_addr);
         }
     }
 
@@ -717,16 +728,20 @@ impl PerCpu {
 
     pub fn read_apic_register(&self, register: u64) -> Result<u64, ApicError> {
         let mut vmsa_ref = self.guest_vmsa_ref();
+        let caa_addr = vmsa_ref.caa_addr();
         let vmsa = vmsa_ref.vmsa();
         self.apic
             .borrow_mut()
-            .read_register(self.shared(), vmsa, register)
+            .read_register(self.shared(), vmsa, caa_addr, register)
     }
 
     pub fn write_apic_register(&self, register: u64, value: u64) -> Result<(), ApicError> {
         let mut vmsa_ref = self.guest_vmsa_ref();
+        let caa_addr = vmsa_ref.caa_addr();
         let vmsa = vmsa_ref.vmsa();
-        self.apic.borrow_mut().write_register(vmsa, register, value)
+        self.apic
+            .borrow_mut()
+            .write_register(vmsa, caa_addr, register, value)
     }
 
     pub fn configure_apic_vector(&self, vector: u8, allowed: bool) {
