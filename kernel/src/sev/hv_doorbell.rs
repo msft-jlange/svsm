@@ -31,10 +31,25 @@ pub struct HVExtIntStatus {
     pub vector_31: bool,
 }
 
+impl HVExtIntStatus {
+    pub fn vmpl_event_mask(vmpl: usize) -> u32 {
+        let bitmask: u32 = HVExtIntStatus::new().with_vmpl1_events(true).into();
+        bitmask << (vmpl - 1)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct HVExtIntInfo {
+    pub status: AtomicU32,
+    pub irr: [AtomicU32; 7],
+    pub isr: [AtomicU32; 8],
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct HVDoorbell {
-    pub status: AtomicU32,
+    pub per_vmpl: [HVExtIntInfo; 4],
 }
 
 impl HVDoorbell {
@@ -56,24 +71,28 @@ impl HVDoorbell {
     /// Processes events specified in the #HV doorbell page, ensuring that
     /// critical events are delivered without being lost.
     pub fn process_events(&self) {
-        let flags = self.status.load(Ordering::Relaxed);
+        let flags = self.per_vmpl[0].status.load(Ordering::Relaxed);
 
         // Clear the no-further-signal bit first.  After this point, additional
         // signals may arrive, but they will block return to lower VMPLs.
         let no_further_signal_mask: u32 = HVExtIntStatus::new().with_no_further_signal(true).into();
-        self.status
+        self.per_vmpl[0]
+            .status
             .fetch_and(!no_further_signal_mask, Ordering::Relaxed);
 
         let ipi_pending_mask: u32 = HVExtIntStatus::new().with_ipi_pending(true).into();
         if (flags & ipi_pending_mask) != 0 {
-            self.status.fetch_and(!ipi_pending_mask, Ordering::Relaxed);
+            self.per_vmpl[0]
+                .status
+                .fetch_and(!ipi_pending_mask, Ordering::Relaxed);
             // IPIs are currently defined to wake only, not to do any work,
             // so no further processing is required.
         }
 
         let timer_pending_mask: u32 = HVExtIntStatus::new().with_timer_pending(true).into();
         if (flags & timer_pending_mask) != 0 {
-            self.status
+            self.per_vmpl[0]
+                .status
                 .fetch_and(!timer_pending_mask, Ordering::Relaxed);
             // There is no current code to schedule APIC timers, so APIC timer
             // expiration can be ignored.

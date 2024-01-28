@@ -488,7 +488,7 @@ impl PerCpu {
         }
     }
 
-    fn hv_doorbell(&self) -> Option<&'static HVDoorbell> {
+    pub fn hv_doorbell(&self) -> Option<&'static HVDoorbell> {
         unsafe {
             let hv_doorbell = (*self.cpu_unsafe).hv_doorbell;
             if hv_doorbell.is_null() {
