@@ -637,13 +637,13 @@ impl PerCpu {
     }
 
     pub fn unmap_guest_vmsa(&self) {
-        assert!(self.shared().apic_id == this_cpu().get_apic_id());
+        assert!(self.shared().apic_id == get_current_apic_id());
         // Ignore errors - the mapping might or might not be there
         let _ = self.vm_range.remove(SVSM_PERCPU_VMSA_BASE);
     }
 
     pub fn map_guest_vmsa(&self, paddr: PhysAddr) -> Result<(), SvsmError> {
-        assert!(self.shared().apic_id == this_cpu().get_apic_id());
+        assert!(self.shared().apic_id == get_current_apic_id());
         let vmsa_mapping = Arc::new(VMPhysMem::new_mapping(paddr, PAGE_SIZE, true));
         self.vm_range
             .insert_at(SVSM_PERCPU_VMSA_BASE, vmsa_mapping)?;
@@ -763,6 +763,13 @@ impl PerCpu {
 
     pub fn set_tss_rsp0(&mut self, addr: VirtAddr) {
         self.tss.stacks[0] = addr;
+    }
+}
+
+pub fn get_current_apic_id() -> u32 {
+    unsafe {
+        let cpu_unsafe = this_cpu_unsafe();
+        (*cpu_unsafe).shared.apic_id
     }
 }
 
