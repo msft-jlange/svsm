@@ -135,6 +135,7 @@ impl GHCBExitCode {
     pub const AP_CREATE: u64 = 0x80000013;
     pub const HV_DOORBELL: u64 = 0x8000_0014;
     pub const RUN_VMPL: u64 = 0x80000018;
+    pub const SPECIFIC_EOI: u64 = 0x8000001A;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -585,6 +586,13 @@ impl GHCB {
     pub fn run_vmpl(&mut self, vmpl: u64) -> Result<(), SvsmError> {
         self.clear();
         self.vmgexit(GHCBExitCode::RUN_VMPL, vmpl, 0)?;
+        Ok(())
+    }
+
+    pub fn specific_eoi(&mut self, vector: u8, vmpl: u8) -> Result<(), SvsmError> {
+        self.clear();
+        let exit_info = ((vmpl as u64) << 16) | (vector as u64);
+        self.vmgexit(GHCBExitCode::SPECIFIC_EOI, exit_info, 0)?;
         Ok(())
     }
 }
