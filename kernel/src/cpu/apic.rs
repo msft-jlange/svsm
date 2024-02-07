@@ -6,7 +6,7 @@
 
 use crate::address::VirtAddr;
 use crate::cpu::ghcb::current_ghcb;
-use crate::cpu::percpu::{this_cpu, PerCpuShared};
+use crate::cpu::percpu::{get_current_apic_id, this_cpu, PerCpuShared, PERCPU_AREAS};
 use crate::cpu::GuestCpuState;
 use crate::error::SvsmError;
 use crate::error::SvsmError::Apic;
@@ -283,14 +283,29 @@ impl LocalApic {
         }
     }
 
+    pub fn consume_pending_ipis(&mut self, cpu_shared: &PerCpuShared) {
+        // Scan the IPI IRR vector an transfer any pending IPIs into the local
+        // IRR vector.
+        for i in 0..8 {
+            self.irr[i] |= cpu_shared.ipi_irr_vector(i);
+        }
+        self.update_required = true;
+    }
+
     pub fn present_interrupts<T: GuestCpuState>(
         &mut self,
+        cpu_shared: &PerCpuShared,
         cpu_state: &mut T,
         caa_addr: Option<VirtAddr>,
     ) {
         // Make sure any interrupts being presented by the host have been
         // consumed.
         self.consume_host_interrupts();
+
+        // Consume any pending IPIs.
+        if cpu_shared.ipi_pending() {
+            self.consume_pending_ipis(cpu_shared);
+        }
 
         if self.update_required {
             // Make sure that all previously delivered interrupts have been
@@ -413,6 +428,26 @@ impl LocalApic {
         self.update_required = true;
     }
 
+    fn send_ipi(&mut self, vector: u8) {
+        // Enumerate all processors in the system and indicate that an IPI has
+        // been requeseted.
+        let apic_id = get_current_apic_id();
+        for cpu_ref in PERCPU_AREAS.iter() {
+            let cpu = cpu_ref.unwrap();
+            if cpu.apic_id() != apic_id {
+                cpu.request_ipi(vector);
+            }
+        }
+
+        // Request an IPI via the hypervisor.  Nothing can be done if the
+        // hypervisor declines to cooperate.
+        let icr = ApicIcr::new()
+            .with_vector(vector)
+            .with_message_type(IcrMessageType::ExtInt);
+        let _r = current_ghcb().hv_ipi(icr.into());
+        assert!(_r.is_ok());
+    }
+
     pub fn read_register<T: GuestCpuState>(
         &mut self,
         cpu_shared: &PerCpuShared,
@@ -459,12 +494,18 @@ impl LocalApic {
             return Err(ApicError::ApicError);
         }
 
-        // FIXME - support destinations other than self.
-        if icr.destination_shorthand() != IcrDestFmt::OnlySelf {
-            return Err(ApicError::ApicError);
+        match icr.destination_shorthand() {
+            IcrDestFmt::OnlySelf => self.post_interrupt(icr.vector(), false),
+            IcrDestFmt::AllButSelf => self.send_ipi(icr.vector()),
+            IcrDestFmt::AllWithSelf => {
+                self.send_ipi(icr.vector());
+                self.post_interrupt(icr.vector(), false);
+            }
+            IcrDestFmt::Dest => {
+                // FIXME - add destination support.
+                panic!("Destination support not yet implemeted");
+            }
         }
-
-        self.post_interrupt(icr.vector(), false);
 
         Ok(())
     }
