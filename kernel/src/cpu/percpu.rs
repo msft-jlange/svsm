@@ -196,13 +196,15 @@ impl GuestVmsaRef {
 
 #[derive(Debug)]
 pub struct PerCpuShared {
+    apic_id: u32,
     guest_vmsa: SpinLock<GuestVmsaRef>,
     online: AtomicBool,
 }
 
 impl PerCpuShared {
-    fn new() -> Self {
+    fn new(apic_id: u32) -> Self {
         PerCpuShared {
+            apic_id,
             guest_vmsa: SpinLock::new(GuestVmsaRef::new()),
             online: AtomicBool::new(false),
         }
@@ -261,8 +263,8 @@ pub struct PerCpuUnsafe {
 impl PerCpuUnsafe {
     pub fn new(apic_id: u32, cpu_unsafe_ptr: *const PerCpuUnsafe) -> Self {
         Self {
-            private: RefCell::new(PerCpu::new(apic_id, cpu_unsafe_ptr)),
-            shared: PerCpuShared::new(),
+            private: RefCell::new(PerCpu::new(cpu_unsafe_ptr)),
+            shared: PerCpuShared::new(apic_id),
             ghcb: ptr::null_mut(),
             hv_doorbell: ptr::null_mut(),
             init_stack: None,
@@ -332,7 +334,6 @@ impl PerCpuUnsafe {
 #[derive(Debug)]
 pub struct PerCpu {
     cpu_unsafe: *const PerCpuUnsafe,
-    apic_id: u32,
     pgtbl: SpinLock<PageTableRef>,
     tss: X86Tss,
     svsm_vmsa: Option<VmsaRef>,
@@ -354,10 +355,9 @@ pub struct PerCpu {
 }
 
 impl PerCpu {
-    fn new(apic_id: u32, cpu_unsafe: *const PerCpuUnsafe) -> Self {
+    fn new(cpu_unsafe: *const PerCpuUnsafe) -> Self {
         PerCpu {
             cpu_unsafe,
-            apic_id,
             pgtbl: SpinLock::<PageTableRef>::new(PageTableRef::unset()),
             tss: X86Tss::new(),
             svsm_vmsa: None,
@@ -386,8 +386,8 @@ impl PerCpu {
         cpu_unsafe.shared()
     }
 
-    pub const fn get_apic_id(&self) -> u32 {
-        self.apic_id
+    pub fn get_apic_id(&self) -> u32 {
+        self.shared().apic_id
     }
 
     fn allocate_page_table(&mut self) -> Result<(), SvsmError> {
@@ -641,13 +641,13 @@ impl PerCpu {
     }
 
     pub fn unmap_guest_vmsa(&self) {
-        assert!(self.apic_id == this_cpu().get_apic_id());
+        assert!(self.shared().apic_id == this_cpu().get_apic_id());
         // Ignore errors - the mapping might or might not be there
         let _ = self.vm_range.remove(SVSM_PERCPU_VMSA_BASE);
     }
 
     pub fn map_guest_vmsa(&self, paddr: PhysAddr) -> Result<(), SvsmError> {
-        assert!(self.apic_id == this_cpu().get_apic_id());
+        assert!(self.shared().apic_id == this_cpu().get_apic_id());
         let vmsa_mapping = Arc::new(VMPhysMem::new_mapping(paddr, PAGE_SIZE, true));
         self.vm_range
             .insert_at(SVSM_PERCPU_VMSA_BASE, vmsa_mapping)?;
