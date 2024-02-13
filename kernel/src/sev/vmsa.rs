@@ -9,6 +9,7 @@ use crate::address::{Address, VirtAddr};
 use crate::cpu::guest_state::GuestCpuState;
 use crate::error::SvsmError;
 use crate::mm::alloc::{allocate_pages, free_page};
+use crate::sev::status::SEVStatusFlags;
 use crate::types::{PageSize, PAGE_SIZE, PAGE_SIZE_2M};
 use crate::utils::zero_mem_region;
 
@@ -132,5 +133,11 @@ impl GuestCpuState for VMSA {
         } else {
             0
         }
+    }
+
+    fn disable_alternate_injection(&mut self) {
+        let mut sev_status = SEVStatusFlags::from_sev_features(self.sev_features);
+        sev_status.remove(SEVStatusFlags::ALT_INJ);
+        self.sev_features = sev_status.as_sev_features();
     }
 }

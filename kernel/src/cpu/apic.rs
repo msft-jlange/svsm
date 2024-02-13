@@ -106,6 +106,12 @@ pub enum ApicError {
     ApicError,
 }
 
+struct GuestApicMsrAccess {
+    rcx: Option<u64>,
+    rax: Option<u64>,
+    rdx: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LocalApic {
     irr: [u32; 8],
@@ -300,7 +306,13 @@ impl LocalApic {
     ) {
         // Make sure any interrupts being presented by the host have been
         // consumed.
-        self.consume_host_interrupts();
+        if self.consume_host_interrupts() {
+            // The host has indicated that the guest has requested a return to
+            // legacy interrupt injection.  Disable the use of alternate
+            // injection.
+            self.disable_alternate_injection(cpu_state, caa_addr);
+            return;
+        }
 
         // Consume any pending IPIs.
         if cpu_shared.ipi_pending() {
@@ -585,19 +597,24 @@ impl LocalApic {
         }
     }
 
-    fn select_interrupt_descriptor(hv_doorbell: &HVDoorbell) -> Option<&HVExtIntInfo> {
+    fn select_interrupt_descriptor(
+        hv_doorbell: &HVDoorbell,
+        scan_only: bool,
+    ) -> Option<&HVExtIntInfo> {
         // Select the correct interrupt descriptor based on which
         // interrupt management style is used by the hypervisor.
         if hypervisor_ghcb_features().contains(GHCBHvFeatures::SEV_SNP_MULTI_VMPL) {
-            // If there is no event pending for the guest VMPL, then no
-            // descriptor is applicable..
-            let guest_vmpl_flag = HVExtIntStatus::vmpl_event_mask(GUEST_VMPL);
-            if (hv_doorbell.per_vmpl[0].status.load(Ordering::Relaxed) & guest_vmpl_flag) == 0 {
-                return None;
+            if scan_only {
+                // If there is no event pending for the guest VMPL, then no
+                // descriptor is applicable..
+                let guest_vmpl_flag = HVExtIntStatus::vmpl_event_mask(GUEST_VMPL);
+                if (hv_doorbell.per_vmpl[0].status.load(Ordering::Relaxed) & guest_vmpl_flag) == 0 {
+                    return None;
+                }
+                hv_doorbell.per_vmpl[0]
+                    .status
+                    .fetch_and(!guest_vmpl_flag, Ordering::Relaxed);
             }
-            hv_doorbell.per_vmpl[0]
-                .status
-                .fetch_and(!guest_vmpl_flag, Ordering::Relaxed);
 
             Some(&hv_doorbell.per_vmpl[GUEST_VMPL])
         } else {
@@ -605,22 +622,31 @@ impl LocalApic {
         }
     }
 
-    pub fn consume_host_interrupts(&mut self) {
+    pub fn consume_host_interrupts(&mut self) -> bool {
         let hv_doorbell_ref = this_cpu().hv_doorbell();
         if let Some(hv_doorbell) = hv_doorbell_ref {
             // Find the appropriate extended interrupt descriptor for the guest
             // VMPL.
-            let descriptor = match Self::select_interrupt_descriptor(hv_doorbell) {
+            let descriptor = match Self::select_interrupt_descriptor(hv_doorbell, true) {
                 None => {
                     // Abort the scan if there is no event pending for the
                     // guest VMPL.
-                    return;
+                    return false;
                 }
                 Some(descr) => descr,
             };
 
-            // First consume any level-sensitive vector that is present.
             let mut flags = HVExtIntStatus::from(descriptor.status.load(Ordering::Relaxed));
+            // First check to see whether the host has indicated that the guest
+            // has issued an MSR access.  If so, a return to legacy interrupt
+            // injection is required.  This is only permissible if the guest
+            // has not committed to using the APIC protocol.
+            if !self.activated && flags.guest_msr_access() {
+                return true;
+            }
+
+            // Consume any level-sensitive vector that is present before
+            // processing any edge-triggered interrupts.
             if flags.level_sensitive() {
                 let mut vector;
                 // Consume the correct vector atomically.
@@ -703,5 +729,129 @@ impl LocalApic {
                 }
             }
         }
+
+        // Do not indicate a return to legacy injection.
+        false
+    }
+
+    fn handoff_to_host(&mut self) -> GuestApicMsrAccess {
+        let hv_doorbell_ref = this_cpu().hv_doorbell();
+        if let Some(hv_doorbell) = hv_doorbell_ref {
+            // Select the appropriate extended interrupt descriptor for the
+            // guest VMPL.  Since this does not imply a scan for interrupts,
+            // this is guaranteed to return something.
+            let descriptor = Self::select_interrupt_descriptor(hv_doorbell, false).unwrap();
+
+            // Capture any guest MSR access that was attempted.
+            let guest_msr = descriptor.isr[0].load(Ordering::Relaxed);
+            let guest_apic_msr_access = GuestApicMsrAccess {
+                rcx: {
+                    // Extract the MSR number, and pass it along only if it
+                    // is an APIC MSR.
+                    let msr_number = guest_msr & 0x7FFF_FFFF;
+                    if (0x800..=0x8FF).contains(&msr_number) {
+                        Some(guest_msr as u64)
+                    } else {
+                        None
+                    }
+                },
+                rax: {
+                    if guest_msr & 0x8000_0000 != 0 {
+                        Some(descriptor.isr[1].load(Ordering::Relaxed) as u64)
+                    } else {
+                        None
+                    }
+                },
+                rdx: {
+                    if guest_msr & 0x8000_0000 != 0 {
+                        Some(descriptor.isr[2].load(Ordering::Relaxed) as u64)
+                    } else {
+                        None
+                    }
+                },
+            };
+
+            // Establish the IRR as holding multiple vectors regardless of the
+            // number of active vectors, as this makes transferring IRR state
+            // simpler.
+            let multiple_vectors_mask: u32 =
+                HVExtIntStatus::new().with_multiple_vectors(true).into();
+            descriptor
+                .status
+                .fetch_or(multiple_vectors_mask, Ordering::Relaxed);
+
+            // If a single, edge-triggered interrupt is present in the
+            // interrupt descriptor, then transfer it to the local IRR.
+            // Level-sensitive interrupts can be left alone since the host must
+            // be prepared to consume those directly.  Note that consuming the
+            // interrupt does not require zeroing the vector, since the host is
+            // supposed to ignore the vector field when multiple vectors are
+            // present (except for the case of level-sensitive interrupts).
+            let flags = HVExtIntStatus::from(descriptor.status.load(Ordering::Relaxed));
+            if flags.pending_vector() >= 31 && !flags.level_sensitive() {
+                Self::insert_vector_register(&mut self.irr, flags.pending_vector());
+            }
+
+            // Copy vector 31 if required, and then insert all of the
+            // additional IRR fields into the host IRR.
+            if self.irr[0] & 0x8000 != 0 {
+                let irr_31_mask: u32 = HVExtIntStatus::new().vector_31().into();
+                descriptor.status.fetch_or(irr_31_mask, Ordering::Relaxed);
+            }
+
+            for i in 1..8 {
+                descriptor.irr[i - 1].fetch_or(self.irr[i], Ordering::Relaxed);
+            }
+
+            // Now transfer the contents of the ISR stack into the host ISR.
+            let mut new_isr = [0u32; 8];
+            for i in 0..self.isr_stack_index {
+                let index = (self.isr_stack[i] >> 5) as usize;
+                let bit = 1u32 << (self.isr_stack[i] & 31);
+                new_isr[index] |= bit;
+            }
+
+            for (host_isr, temp_isr) in descriptor.isr.iter().zip(new_isr.iter()) {
+                host_isr.store(*temp_isr, Ordering::Relaxed);
+            }
+
+            // Send back the MSR access that was attmpted by the guest.
+            guest_apic_msr_access
+        } else {
+            GuestApicMsrAccess {
+                rcx: None,
+                rax: None,
+                rdx: None,
+            }
+        }
+    }
+
+    fn disable_alternate_injection<T: GuestCpuState>(
+        &mut self,
+        cpu_state: &mut T,
+        caa_addr: Option<VirtAddr>,
+    ) {
+        // Ensure that any previous interrupt delivery is complete.
+        self.check_delivered_interrupts(cpu_state, caa_addr);
+
+        // Hand the current APIC state off to the host.
+        let guest_apic_msr_access = self.handoff_to_host();
+
+        let _ = Self::clear_guest_eoi_pending(caa_addr);
+
+        // Disable alternate injection altogether.
+        cpu_state.disable_alternate_injection();
+
+        // Finally, ask the host to take over APIC emulation.
+        current_ghcb()
+            .disable_alternate_injection(
+                cpu_state.get_tpr(),
+                cpu_state.in_intr_shadow(),
+                cpu_state.interrupts_enabled(),
+                guest_apic_msr_access.rcx,
+                guest_apic_msr_access.rax,
+                guest_apic_msr_access.rdx,
+            )
+            .expect("Failed to disable alterate injection");
     }
 }

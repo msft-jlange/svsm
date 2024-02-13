@@ -16,7 +16,7 @@ use crate::mm::validate::{
 use crate::mm::virt_to_phys;
 use crate::sev::sev_snp_enabled;
 use crate::sev::utils::raw_vmgexit;
-use crate::types::{PageSize, PAGE_SIZE_2M};
+use crate::types::{PageSize, GUEST_VMPL, PAGE_SIZE_2M};
 use core::mem::{self, offset_of};
 use core::ptr;
 
@@ -136,6 +136,7 @@ impl GHCBExitCode {
     pub const HV_DOORBELL: u64 = 0x8000_0014;
     pub const HV_IPI: u64 = 0x8000_0015;
     pub const RUN_VMPL: u64 = 0x80000018;
+    pub const DISABLE_ALT_INJ: u64 = 0x8000_0019;
     pub const SPECIFIC_EOI: u64 = 0x8000001A;
 }
 
@@ -593,6 +594,41 @@ impl GHCB {
     pub fn run_vmpl(&mut self, vmpl: u64) -> Result<(), SvsmError> {
         self.clear();
         self.vmgexit(GHCBExitCode::RUN_VMPL, vmpl, 0)?;
+        Ok(())
+    }
+
+    pub fn disable_alternate_injection(
+        &mut self,
+        tpr: u8,
+        in_intr_shadow: bool,
+        interrupts_enabled: bool,
+        guest_rcx: Option<u64>,
+        guest_rax: Option<u64>,
+        guest_rdx: Option<u64>,
+    ) -> Result<(), SvsmError> {
+        let mut exit_info = (GUEST_VMPL as u64) << 16;
+        exit_info |= (tpr as u64) << 8;
+        if in_intr_shadow {
+            exit_info |= 2;
+        }
+        if interrupts_enabled {
+            exit_info |= 1;
+        }
+        self.clear();
+
+        // If guest MSR access information ws provided, then include it in the
+        // GHCB page.
+        if let Some(rcx) = guest_rcx {
+            self.set_rcx_valid(rcx);
+            if let Some(rax) = guest_rax {
+                self.set_rax_valid(rax);
+            };
+            if let Some(rdx) = guest_rdx {
+                self.set_rdx_valid(rdx);
+            };
+        };
+
+        self.vmgexit(GHCBExitCode::DISABLE_ALT_INJ, exit_info, 0)?;
         Ok(())
     }
 
