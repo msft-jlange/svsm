@@ -26,6 +26,7 @@ use crate::cmd_options::{CmdOptions, Hypervisor};
 use crate::cpuid::SnpCpuidPage;
 use crate::firmware::{parse_firmware, Firmware};
 use crate::stage2_stack::Stage2Stack;
+use crate::tdx_reset::create_tdx_reset_page;
 use crate::vmsa::construct_vmsa;
 use crate::GpaMap;
 
@@ -286,6 +287,10 @@ impl IgvmBuilder {
             param_block.vtom,
             SNP_COMPATIBILITY_MASK,
         )?);
+
+        // Construct a TDX reset page.
+        self.directives
+            .push(create_tdx_reset_page(TDX_COMPATIBILITY_MASK)?);
 
         // Add the IGVM parameter block
         self.add_param_block(param_block);

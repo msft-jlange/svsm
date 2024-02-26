@@ -11,6 +11,7 @@ use igvm::snp_defs::{SevFeatures, SevVmsa};
 use igvm::IgvmDirectiveHeader;
 use zerocopy::FromZeroes;
 
+use crate::context::{CODE_SELECTOR, DATA_SELECTOR};
 use crate::stage2_stack::Stage2Stack;
 
 pub fn construct_vmsa(
@@ -24,12 +25,12 @@ pub fn construct_vmsa(
     // Establish CS as a 32-bit code selector.
     vmsa.cs.attrib = 0xc9b;
     vmsa.cs.limit = 0xffffffff;
-    vmsa.cs.selector = 0x08;
+    vmsa.cs.selector = CODE_SELECTOR;
 
     // Establish all data segments as generic data selectors.
     vmsa.ds.attrib = 0xa93;
     vmsa.ds.limit = 0xffffffff;
-    vmsa.ds.selector = 0x10;
+    vmsa.ds.selector = DATA_SELECTOR;
     vmsa.ss = vmsa.ds;
     vmsa.es = vmsa.ds;
     vmsa.fs = vmsa.ds;
