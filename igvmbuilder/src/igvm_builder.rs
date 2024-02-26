@@ -28,7 +28,9 @@ use crate::stage2_stack::Stage2Stack;
 use crate::vmsa::construct_vmsa;
 use crate::GpaMap;
 
-const COMPATIBILITY_MASK: u32 = 1;
+const SNP_COMPATIBILITY_MASK: u32 = 1;
+const TDX_COMPATIBILITY_MASK: u32 = 2;
+const FULL_COMPATIBILITY_MASK: u32 = SNP_COMPATIBILITY_MASK | TDX_COMPATIBILITY_MASK;
 
 // Parameter area indices
 const IGVM_GENERAL_PARAMS_PA: u32 = 0;
@@ -53,7 +55,7 @@ impl IgvmBuilder {
             Some(_) => Some(parse_firmware(
                 &options,
                 IGVM_PARAMETER_COUNT,
-                COMPATIBILITY_MASK,
+                FULL_COMPATIBILITY_MASK,
             )?),
             None => None,
         };
@@ -200,11 +202,20 @@ impl IgvmBuilder {
     fn build_platforms(&mut self, param_block: &IgvmParamBlock) {
         self.platforms.push(IgvmPlatformHeader::SupportedPlatform(
             IGVM_VHS_SUPPORTED_PLATFORM {
-                compatibility_mask: COMPATIBILITY_MASK,
+                compatibility_mask: SNP_COMPATIBILITY_MASK,
                 highest_vtl: 2,
                 platform_type: IgvmPlatformType::SEV_SNP,
                 platform_version: 1,
                 shared_gpa_boundary: param_block.vtom,
+            },
+        ));
+        self.platforms.push(IgvmPlatformHeader::SupportedPlatform(
+            IGVM_VHS_SUPPORTED_PLATFORM {
+                compatibility_mask: TDX_COMPATIBILITY_MASK,
+                highest_vtl: 2,
+                platform_type: IgvmPlatformType::TDX,
+                platform_version: 1,
+                shared_gpa_boundary: 1u64 << 47,
             },
         ));
     }
@@ -222,7 +233,7 @@ impl IgvmBuilder {
         // Describe the kernel RAM region
         self.directives.push(IgvmDirectiveHeader::RequiredMemory {
             gpa: param_block.kernel_base,
-            compatibility_mask: COMPATIBILITY_MASK,
+            compatibility_mask: FULL_COMPATIBILITY_MASK,
             number_of_bytes: param_block.kernel_size,
             vtl2_protectable: false,
         });
@@ -256,14 +267,14 @@ impl IgvmBuilder {
         self.directives.push(IgvmDirectiveHeader::ParameterInsert(
             IGVM_VHS_PARAMETER_INSERT {
                 gpa: self.gpa_map.memory_map.get_start(),
-                compatibility_mask: COMPATIBILITY_MASK,
+                compatibility_mask: FULL_COMPATIBILITY_MASK,
                 parameter_area_index: IGVM_MEMORY_MAP_PA,
             },
         ));
         self.directives.push(IgvmDirectiveHeader::ParameterInsert(
             IGVM_VHS_PARAMETER_INSERT {
                 gpa: self.gpa_map.general_params.get_start(),
-                compatibility_mask: COMPATIBILITY_MASK,
+                compatibility_mask: FULL_COMPATIBILITY_MASK,
                 parameter_area_index: IGVM_GENERAL_PARAMS_PA,
             },
         ));
@@ -272,7 +283,7 @@ impl IgvmBuilder {
         self.directives.push(construct_vmsa(
             self.gpa_map.vmsa.get_start(),
             param_block.vtom,
-            COMPATIBILITY_MASK,
+            SNP_COMPATIBILITY_MASK,
         )?);
 
         // Add the IGVM parameter block
@@ -293,7 +304,7 @@ impl IgvmBuilder {
         let cpuid_page = SnpCpuidPage::new()?;
         cpuid_page.add_directive(
             self.gpa_map.cpuid_page.get_start(),
-            COMPATIBILITY_MASK,
+            SNP_COMPATIBILITY_MASK,
             &mut self.directives,
         );
 
@@ -321,7 +332,7 @@ impl IgvmBuilder {
         let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom);
         stage2_stack.add_directive(
             self.gpa_map.stage2_stack.get_start(),
-            COMPATIBILITY_MASK,
+            FULL_COMPATIBILITY_MASK,
             &mut self.directives,
         );
 
@@ -361,7 +372,8 @@ impl IgvmBuilder {
             if len == 0 {
                 break;
             }
-            self.directives.push(Self::new_page_data(gpa, 1, buf));
+            self.directives
+                .push(Self::new_page_data(gpa, FULL_COMPATIBILITY_MASK, buf));
             gpa += PAGE_SIZE_4K;
             buf = vec![0; 4096];
         }
@@ -374,7 +386,7 @@ impl IgvmBuilder {
 
         self.directives.push(IgvmDirectiveHeader::PageData {
             gpa: self.gpa_map.igvm_param_block.get_start(),
-            compatibility_mask: COMPATIBILITY_MASK,
+            compatibility_mask: FULL_COMPATIBILITY_MASK,
             flags: IgvmPageDataFlags::new(),
             data_type: IgvmPageDataType::NORMAL,
             data,
@@ -387,7 +399,7 @@ impl IgvmBuilder {
 
         self.directives.push(IgvmDirectiveHeader::PageData {
             gpa: self.gpa_map.guest_context.get_start(),
-            compatibility_mask: COMPATIBILITY_MASK,
+            compatibility_mask: FULL_COMPATIBILITY_MASK,
             flags: IgvmPageDataFlags::new(),
             data_type: IgvmPageDataType::NORMAL,
             data,
@@ -403,7 +415,7 @@ impl IgvmBuilder {
         for gpa in (gpa_start..(gpa_start + size)).step_by(PAGE_SIZE_4K as usize) {
             self.directives.push(IgvmDirectiveHeader::PageData {
                 gpa,
-                compatibility_mask: COMPATIBILITY_MASK,
+                compatibility_mask: FULL_COMPATIBILITY_MASK,
                 flags: IgvmPageDataFlags::new(),
                 data_type,
                 data: vec![],
