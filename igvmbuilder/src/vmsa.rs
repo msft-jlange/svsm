@@ -7,7 +7,7 @@
 use std::error::Error;
 use std::mem::size_of;
 
-use igvm::snp_defs::{SevFeatures, SevVmsa};
+use cpuarch::vmsa::VMSA;
 use igvm::IgvmDirectiveHeader;
 use zerocopy::FromZeroes;
 
@@ -17,7 +17,7 @@ pub fn construct_vmsa(
     gpa_start: u64,
     compatibility_mask: u32,
 ) -> Result<IgvmDirectiveHeader, Box<dyn Error>> {
-    let mut vmsa_box = SevVmsa::new_box_zeroed();
+    let mut vmsa_box = Box::<VMSA>::new();
     let vmsa = vmsa_box.as_mut();
 
     // Establish CS as a 32-bit code selector.

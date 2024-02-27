@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fs;
 
 use bootlib::igvm_params::{IgvmGuestContext, IgvmParamBlockFwInfo};
-use igvm::snp_defs::SevVmsa;
+use cpuarch::VMSA;
 use igvm::{IgvmDirectiveHeader, IgvmFile};
 use igvm_defs::{IgvmPageDataType, PAGE_SIZE_4K};
 use zerocopy::AsBytes;
