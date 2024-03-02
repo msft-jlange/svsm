@@ -25,6 +25,7 @@ impl SvsmPlatformCell {
     pub fn new(platform_type: SvsmPlatformType) -> Self {
         match platform_type {
             SvsmPlatformType::Snp => SvsmPlatformCell::Snp(SnpPlatform::new()),
+            SvsmPlatformType::Tdx => todo!(),
         }
     }
 

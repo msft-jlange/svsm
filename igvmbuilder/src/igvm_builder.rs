@@ -13,6 +13,7 @@ use std::mem::size_of;
 use bootlib::igvm_params::{
     IgvmGuestContext, IgvmParamBlock, IgvmParamBlockFwInfo, IgvmParamBlockFwMem,
 };
+use bootlib::platform::SvsmPlatformType;
 use clap::Parser;
 use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IgvmRevision};
 use igvm_defs::{
@@ -28,9 +29,9 @@ use crate::stage2_stack::Stage2Stack;
 use crate::vmsa::construct_vmsa;
 use crate::GpaMap;
 
-const SNP_COMPATIBILITY_MASK: u32 = 1;
-const TDX_COMPATIBILITY_MASK: u32 = 2;
-const FULL_COMPATIBILITY_MASK: u32 = SNP_COMPATIBILITY_MASK | TDX_COMPATIBILITY_MASK;
+pub const SNP_COMPATIBILITY_MASK: u32 = 1;
+pub const TDX_COMPATIBILITY_MASK: u32 = 2;
+pub const FULL_COMPATIBILITY_MASK: u32 = SNP_COMPATIBILITY_MASK | TDX_COMPATIBILITY_MASK;
 
 // Parameter area indices
 const IGVM_GENERAL_PARAMS_PA: u32 = 0;
@@ -328,11 +329,17 @@ impl IgvmBuilder {
             self.gpa_map.stage2_image.get_start(),
         )?;
 
-        // Populate the stage 2 stack.
+        // Populate the stage 2 stack.  This has different contents on each
+        // platform.
         let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom);
         stage2_stack.add_directive(
             self.gpa_map.stage2_stack.get_start(),
-            FULL_COMPATIBILITY_MASK,
+            SvsmPlatformType::Snp,
+            &mut self.directives,
+        );
+        stage2_stack.add_directive(
+            self.gpa_map.stage2_stack.get_start(),
+            SvsmPlatformType::Tdx,
             &mut self.directives,
         );
 

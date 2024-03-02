@@ -8,5 +8,22 @@
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub enum SvsmPlatformType {
-    Snp = 0,
+    Tdx = 0,
+    Snp = 1,
+}
+
+impl SvsmPlatformType {
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Self::Tdx => 0,
+            Self::Snp => 1,
+        }
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            0 => Self::Tdx,
+            _ => Self::Snp,
+        }
+    }
 }
