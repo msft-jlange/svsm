@@ -203,6 +203,20 @@ global_asm!(
         .code64
 
     startup_64:
+        /*
+         * If this is not SNP, then calculate the shared address mask based
+         * on the information provided by the platform in ebx
+         */
+        cmpl $0, 8(%rsp)
+        jnz .Lis_snp
+
+        xorl %eax, %eax
+        decl %ebx
+        bts %rbx, %rax
+        movq %rax, (%rsp)
+
+    .Lis_snp:
+
         /* Reload the data segments with 64bit descriptors. */
         movw $0x20, %ax
         movw %ax, %ds
