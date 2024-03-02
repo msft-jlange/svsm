@@ -84,11 +84,17 @@ global_asm!(
         bts $5, %eax
         movl %eax, %cr4
 
+        /* If not SNP, skip loading EFER */
+        cmpl $0, 8(%esi)
+        jz .Lskip_efer
+
         /* Enable long mode, EFER.LME. */
         movl $0xc0000080, %ecx
         rdmsr
         bts $8, %eax
         wrmsr
+
+    .Lskip_efer:
 
         /* Load the static page table root. */
         movl $pgtable, %eax
@@ -108,6 +114,12 @@ global_asm!(
         lret
 
     get_pte_c_bit:
+        /*
+         * Check if this is an SNP platform.  If not, there is no C bit.
+         */
+        cmpl $0, 8(%esi)
+        jz .Lvtom
+
         /*
          * Check that the SNP_Active bit in the SEV_STATUS MSR is set.
          */
