@@ -42,6 +42,7 @@ use svsm::mm::memory::init_memory_map;
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::virtualrange::virt_log_usage;
 use svsm::mm::{init_kernel_mapping_info, PerCPUPageMappingGuard};
+use svsm::platform::SvsmPlatformCell;
 use svsm::requests::{request_loop, request_processing_main, update_mappings};
 use svsm::serial::SerialPort;
 use svsm::sev::utils::{rmp_adjust, RMPFlags};
@@ -278,6 +279,9 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     LAUNCH_INFO
         .init(li)
         .expect("Already initialized launch info");
+
+    let mut platform_cell = SvsmPlatformCell::new(li.platform_type);
+    let _platform = platform_cell.as_mut_dyn_ref();
 
     let cpuid_table_virt = VirtAddr::from(launch_info.cpuid_page);
     if !cpuid_table_virt.is_aligned(align_of::<SnpCpuidTable>()) {
