@@ -13,7 +13,7 @@ use crate::error::SvsmError;
 use crate::locking::{LockGuard, SpinLock};
 use crate::mm::alloc::{allocate_zeroed_page, free_page};
 use crate::mm::{phys_to_virt, virt_to_phys, PGTABLE_LVL3_IDX_SHARED};
-use crate::sev::status::vtom_enabled;
+use crate::platform::SvsmPlatform;
 use crate::types::{PageSize, PAGE_SIZE, PAGE_SIZE_2M};
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 use crate::utils::MemoryRegion;
@@ -32,8 +32,8 @@ pub const LAUNCH_VMSA_ADDR: PhysAddr = PhysAddr::new(0xFFFFFFFFF000);
 static FEATURE_MASK: ImmutAfterInitCell<PTEntryFlags> =
     ImmutAfterInitCell::new(PTEntryFlags::empty());
 
-pub fn paging_init_early(vtom: u64) {
-    init_encrypt_mask(vtom.try_into().unwrap());
+pub fn paging_init_early(platform: &dyn SvsmPlatform, vtom: u64) {
+    init_encrypt_mask(platform, vtom.try_into().unwrap());
 
     let mut feature_mask = PTEntryFlags::all();
     feature_mask.remove(PTEntryFlags::NX);
@@ -41,8 +41,8 @@ pub fn paging_init_early(vtom: u64) {
     FEATURE_MASK.reinit(&feature_mask);
 }
 
-pub fn paging_init(vtom: u64) {
-    init_encrypt_mask(vtom.try_into().unwrap());
+pub fn paging_init(platform: &dyn SvsmPlatform, vtom: u64) {
+    init_encrypt_mask(platform, vtom.try_into().unwrap());
 
     let mut feature_mask = PTEntryFlags::all();
     if !cpu_has_nx() {
@@ -54,11 +54,11 @@ pub fn paging_init(vtom: u64) {
     FEATURE_MASK.reinit(&feature_mask);
 }
 
-fn init_encrypt_mask(vtom: usize) {
+fn init_encrypt_mask(platform: &dyn SvsmPlatform, vtom: usize) {
     // Determine whether VTOM is in use.
 
     let zero: usize = 0;
-    let addr_mask_width = if vtom_enabled() {
+    let addr_mask_width = if platform.use_shared_gpa_bit() {
         PRIVATE_PTE_MASK.reinit(&zero);
         SHARED_PTE_MASK.reinit(&vtom);
         // Find the MSB of VTOM to define the number of bits in the effective

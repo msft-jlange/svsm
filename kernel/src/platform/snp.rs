@@ -6,6 +6,7 @@
 
 use crate::platform::SvsmPlatform;
 use crate::sev::sev_status_init;
+use crate::sev::status::vtom_enabled;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SnpPlatform {}
@@ -19,5 +20,9 @@ impl SnpPlatform {
 impl SvsmPlatform for SnpPlatform {
     fn env_setup(&mut self) {
         sev_status_init();
+    }
+
+    fn use_shared_gpa_bit(&self) -> bool {
+        vtom_enabled()
     }
 }

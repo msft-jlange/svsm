@@ -12,6 +12,7 @@ pub mod snp;
 
 pub trait SvsmPlatform {
     fn env_setup(&mut self);
+    fn use_shared_gpa_bit(&self) -> bool;
 }
 
 //FIXME - remove Copy trait

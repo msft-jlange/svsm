@@ -281,7 +281,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
         .expect("Already initialized launch info");
 
     let mut platform_cell = SvsmPlatformCell::new(li.platform_type);
-    let _platform = platform_cell.as_mut_dyn_ref();
+    let platform = platform_cell.as_mut_dyn_ref();
 
     let cpuid_table_virt = VirtAddr::from(launch_info.cpuid_page);
     if !cpuid_table_virt.is_aligned(align_of::<SnpCpuidTable>()) {
@@ -323,7 +323,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
         Err(e) => panic!("error reading kernel ELF: {}", e),
     };
 
-    paging_init(li.vtom);
+    paging_init(platform, li.vtom);
     init_page_table(&launch_info, &kernel_elf).expect("Could not initialize the page table");
 
     // SAFETY: this PerCpu has just been allocated and no other CPUs have been
