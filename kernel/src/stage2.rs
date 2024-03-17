@@ -15,7 +15,7 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 use core::ptr::{addr_of, addr_of_mut};
 use core::slice;
-use cpuarch::snp_cpuid::SnpCpuidTable;
+use cpuarch::cpuid::SvsmCpuidTable;
 use svsm::address::{Address, PhysAddr, VirtAddr};
 use svsm::config::SvsmConfig;
 use svsm::console::{init_console, install_console_logger, WRITER};
@@ -50,7 +50,7 @@ extern "C" {
     pub static heap_start: u8;
     pub static heap_end: u8;
     pub static mut pgtable: PageTable;
-    pub static CPUID_PAGE: SnpCpuidTable;
+    pub static mut CPUID_PAGE: SvsmCpuidTable;
 }
 
 fn setup_stage2_allocator() {
@@ -102,6 +102,7 @@ fn setup_env(
         VirtAddr::from(640 * 1024usize),
         PhysAddr::null(),
     );
+    platform.prepare_cpuid_table(unsafe { &mut CPUID_PAGE });
     register_cpuid_table(unsafe { &CPUID_PAGE });
     paging_init_early(platform, launch_info.vtom);
 

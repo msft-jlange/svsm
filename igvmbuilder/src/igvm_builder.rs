@@ -314,6 +314,14 @@ impl IgvmBuilder {
             &mut self.directives,
         );
 
+        // On TDX, add the CPUID page as raw data so the CPUID page can be
+        // populated by the running TD.
+        cpuid_page.add_directive_as_data(
+            self.gpa_map.cpuid_page.get_start(),
+            TDX_COMPATIBILITY_MASK,
+            &mut self.directives,
+        );
+
         // Secrets page
         self.add_empty_pages(
             self.gpa_map.secrets_page.get_start(),

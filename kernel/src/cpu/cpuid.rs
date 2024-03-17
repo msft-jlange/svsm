@@ -5,11 +5,13 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::utils::immut_after_init::ImmutAfterInitRef;
-use cpuarch::snp_cpuid::SnpCpuidTable;
+use cpuarch::cpuid::SvsmCpuidTable;
 
-static CPUID_PAGE: ImmutAfterInitRef<'_, SnpCpuidTable> = ImmutAfterInitRef::uninit();
+use core::arch::asm;
 
-pub fn register_cpuid_table(table: &'static SnpCpuidTable) {
+static CPUID_PAGE: ImmutAfterInitRef<'_, SvsmCpuidTable> = ImmutAfterInitRef::uninit();
+
+pub fn register_cpuid_table(table: &'static SvsmCpuidTable) {
     CPUID_PAGE
         .init_from_ref(table)
         .expect("Could not initialize CPUID page");
@@ -89,4 +91,22 @@ pub fn dump_cpuid_table() {
         log::trace!("EAX_IN: {:#010x} ECX_IN: {:#010x} XCR0_IN: {:#010x} XSS_IN: {:#010x} EAX_OUT: {:#010x} EBX_OUT: {:#010x} ECX_OUT: {:#010x} EDX_OUT: {:#010x}",
                     eax_in, ecx_in, xcr0_in, xss_in, eax_out, ebx_out, ecx_out, edx_out);
     }
+}
+
+fn fill_native_cpuid(eax: u32, ecx: u32) -> CpuidResult {
+    unsafe {
+        let mut result: CpuidResult;
+        asm!("push %ebx",
+             "cpuid",
+             "movl %ebx, %edi",
+             "pop %ebx",
+             in("eax") eax, in ("ecx") ecx, lateout("eax") result.eax,
+            lateout("edi") result.ebx, lateout("ecx") result.ecx, lateout("edx") result.edx,
+            options(att_syntax));
+        result
+    }
+}
+
+pub fn populate_cpuid_table(cpuid_table: &mut SvsmCpuidTable) {
+    todo!();
 }

@@ -113,10 +113,11 @@ impl SnpCpuidPage {
         Ok(cpuid_page)
     }
 
-    pub fn add_directive(
+    fn add_directive_as_type(
         &self,
         gpa: u64,
         compatibility_mask: u32,
+        data_type: IgvmPageDataType,
         directives: &mut Vec<IgvmDirectiveHeader>,
     ) {
         let mut data = self.as_bytes().to_vec();
@@ -126,9 +127,37 @@ impl SnpCpuidPage {
             gpa,
             compatibility_mask,
             flags: IgvmPageDataFlags::new(),
-            data_type: IgvmPageDataType::CPUID_DATA,
+            data_type,
             data,
         });
+    }
+
+    pub fn add_directive(
+        &self,
+        gpa: u64,
+        compatibility_mask: u32,
+        directives: &mut Vec<IgvmDirectiveHeader>,
+    ) {
+        self.add_directive_as_type(
+            gpa,
+            compatibility_mask,
+            IgvmPageDataType::CPUID_DATA,
+            directives,
+        );
+    }
+
+    pub fn add_directive_as_data(
+        &self,
+        gpa: u64,
+        compatibility_mask: u32,
+        directives: &mut Vec<IgvmDirectiveHeader>,
+    ) {
+        self.add_directive_as_type(
+            gpa,
+            compatibility_mask,
+            IgvmPageDataType::NORMAL,
+            directives,
+        );
     }
 
     fn add(&mut self, leaf: SnpCpuidLeaf) -> Result<(), Box<dyn Error>> {

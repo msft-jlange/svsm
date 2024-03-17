@@ -20,18 +20,25 @@ pub struct SnpCpuidFn {
     pub reserved_1: u64,
 }
 
+///
+/// `SvsmCpuidTable` is designed to have the same layout as the SNP ABI
+/// definition of the CPUID table, but it is used on other platforms to
+/// aggregate CPUID information.  This data may include data provided by the
+/// untrusted host so it must be captured once so later references are
+/// consistent.
+///
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
-pub struct SnpCpuidTable {
+pub struct SvsmCpuidTable {
     pub count: u32,
     pub reserved_1: u32,
     pub reserved_2: u64,
     pub func: [SnpCpuidFn; SNP_CPUID_MAX_COUNT],
 }
 
-impl Default for SnpCpuidTable {
+impl Default for SvsmCpuidTable {
     fn default() -> Self {
-        SnpCpuidTable {
+        SvsmCpuidTable {
             count: Default::default(),
             reserved_1: Default::default(),
             reserved_2: Default::default(),

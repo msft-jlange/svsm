@@ -8,6 +8,8 @@ use crate::platform::SvsmPlatform;
 use crate::sev::sev_status_init;
 use crate::sev::status::vtom_enabled;
 
+use cpuarch::cpuid::SvsmCpuidTable;
+
 #[derive(Clone, Copy, Debug)]
 pub struct SnpPlatform {}
 
@@ -24,5 +26,8 @@ impl SvsmPlatform for SnpPlatform {
 
     fn use_shared_gpa_bit(&self) -> bool {
         vtom_enabled()
+    }
+
+    fn prepare_cpuid_table(&self, _cpuid_page: &'static mut SvsmCpuidTable) {
     }
 }

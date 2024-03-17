@@ -8,6 +8,7 @@ use crate::platform::snp::SnpPlatform;
 use crate::platform::tdx::TdxPlatform;
 
 use bootlib::platform::SvsmPlatformType;
+use cpuarch::cpuid::SvsmCpuidTable;
 
 pub mod snp;
 pub mod tdx;
@@ -15,6 +16,7 @@ pub mod tdx;
 pub trait SvsmPlatform {
     fn env_setup(&mut self);
     fn use_shared_gpa_bit(&self) -> bool;
+    fn prepare_cpuid_table(&self, cpuid_page: &'static mut SvsmCpuidTable);
 }
 
 //FIXME - remove Copy trait

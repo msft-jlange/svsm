@@ -15,7 +15,7 @@ use core::mem::{align_of, size_of};
 use core::panic::PanicInfo;
 use core::ptr;
 use core::slice;
-use cpuarch::snp_cpuid::SnpCpuidTable;
+use cpuarch::cpuid::SvsmCpuidTable;
 use svsm::address::{Address, PhysAddr, VirtAddr};
 use svsm::config::SvsmConfig;
 use svsm::console::{init_console, install_console_logger, WRITER};
@@ -94,10 +94,10 @@ global_asm!(
     options(att_syntax)
 );
 
-static CPUID_PAGE: ImmutAfterInitCell<SnpCpuidTable> = ImmutAfterInitCell::uninit();
+static CPUID_PAGE: ImmutAfterInitCell<SvsmCpuidTable> = ImmutAfterInitCell::uninit();
 static LAUNCH_INFO: ImmutAfterInitCell<KernelLaunchInfo> = ImmutAfterInitCell::uninit();
 
-const _: () = assert!(size_of::<SnpCpuidTable>() <= PAGE_SIZE);
+const _: () = assert!(size_of::<SvsmCpuidTable>() <= PAGE_SIZE);
 
 fn copy_cpuid_table_to_fw(fw_addr: PhysAddr) -> Result<(), SvsmError> {
     let guard = PerCPUPageMappingGuard::create_4k(fw_addr)?;
@@ -111,7 +111,7 @@ fn copy_cpuid_table_to_fw(fw_addr: PhysAddr) -> Result<(), SvsmError> {
         // Zero target and copy data
         start.write_bytes(0, PAGE_SIZE);
         start
-            .cast::<SnpCpuidTable>()
+            .cast::<SvsmCpuidTable>()
             .copy_from_nonoverlapping(&*CPUID_PAGE, 1);
     }
 
@@ -284,7 +284,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     let platform = platform_cell.as_mut_dyn_ref();
 
     let cpuid_table_virt = VirtAddr::from(launch_info.cpuid_page);
-    if !cpuid_table_virt.is_aligned(align_of::<SnpCpuidTable>()) {
+    if !cpuid_table_virt.is_aligned(align_of::<SvsmCpuidTable>()) {
         panic!("Misaligned SNP CPUID table address");
     }
     // SAFETY: this is the main function for the SVSM and no other CPUs have
@@ -292,7 +292,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     // the pointer is aligned so we can create a temporary reference.
     unsafe {
         CPUID_PAGE
-            .init(&*(cpuid_table_virt.as_ptr::<SnpCpuidTable>()))
+            .init(&*(cpuid_table_virt.as_ptr::<SvsmCpuidTable>()))
             .expect("Already initialized CPUID page")
     };
     register_cpuid_table(&CPUID_PAGE);

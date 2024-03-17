@@ -1,4 +1,4 @@
 #![no_std]
 
-pub mod snp_cpuid;
+pub mod cpuid;
 pub mod vmsa;
