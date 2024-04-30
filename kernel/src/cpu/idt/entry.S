@@ -58,6 +58,16 @@ asm_entry_\name:
 	jmp	default_return
 .endm
 
+.macro isr_entry_no_ist vector:req
+	.globl asm_entry_irq_\vector
+asm_entry_irq_\vector:
+	push_regs
+	movl	$\vector, %esi
+	movq	%rsp, %rdi
+	call	common_isr_handler
+	jmp	default_return
+.endm
+
 .globl default_return
 default_return:
 	testb	$3, 17*8(%rsp) // Check CS in exception frame

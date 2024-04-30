@@ -18,6 +18,7 @@ use super::common::{
 use crate::address::VirtAddr;
 use crate::cpu::X86ExceptionContext;
 use crate::debug::gdbstub::svsm_gdbstub::handle_debug_exception;
+use crate::platform::SVSM_PLATFORM;
 use crate::task::{is_task_fault, terminate};
 
 use core::arch::global_asm;
@@ -244,6 +245,12 @@ pub extern "C" fn ex_handler_panic(ctx: &mut X86ExceptionContext, vector: usize)
         "Unhandled exception {} RIP {:#018x} error code: {:#018x} RSP: {:#018x} SS: {:#x}",
         vector, rip, err, rsp, ss
     );
+}
+
+#[no_mangle]
+pub extern "C" fn common_isr_handler(_ctx: *mut X86ExceptionContext, _vector: usize) {
+    // Treat any unhandled interrupt as a spurious interrupt.
+    SVSM_PLATFORM.as_dyn_ref().eoi();
 }
 
 global_asm!(include_str!("entry.S"), options(att_syntax));

@@ -66,6 +66,9 @@ pub trait SvsmPlatform {
     /// Marks a page as valid or invalid as a private page.
     fn pvalidate_range(&self, region: MemoryRegion<VirtAddr>, valid: bool)
         -> Result<(), SvsmError>;
+
+    /// Perform an EOI of the current interrupt.
+    fn eoi(&self);
 }
 
 //FIXME - remove Copy trait

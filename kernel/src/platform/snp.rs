@@ -118,4 +118,8 @@ impl SvsmPlatform for SnpPlatform {
         };
         pvalidate_range(region, pvalidate_op)
     }
+
+    fn eoi(&self) {
+        todo!();
+    }
 }

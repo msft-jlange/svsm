@@ -74,4 +74,8 @@ impl SvsmPlatform for NativePlatform {
     ) -> Result<(), SvsmError> {
         Ok(())
     }
+
+    fn eoi(&self) {
+        todo!();
+    }
 }
