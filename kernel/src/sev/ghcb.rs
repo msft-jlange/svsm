@@ -130,6 +130,7 @@ impl GHCBExitCode {
     pub const GUEST_EXT_REQUEST: u64 = 0x8000_0012;
     pub const AP_CREATE: u64 = 0x80000013;
     pub const HV_DOORBELL: u64 = 0x8000_0014;
+    pub const HV_IPI: u64 = 0x8000_0015;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -582,6 +583,12 @@ impl GHCB {
             return Err(GhcbError::VmgexitError(self.rbx, sw_exit_info_2).into());
         }
 
+        Ok(())
+    }
+
+    pub fn hv_ipi(&mut self, icr: u64) -> Result<(), SvsmError> {
+        self.clear();
+        self.vmgexit(GHCBExitCode::HV_IPI, icr, 0)?;
         Ok(())
     }
 }
