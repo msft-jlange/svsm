@@ -51,6 +51,10 @@ pub struct CmdOptions {
     /// Include NATIVE platform target
     #[arg(long, default_value_t = false)]
     pub native: bool,
+
+    /// Use Alternate Injection if available
+    #[arg(long, default_value_t = false)]
+    pub alt_injection: bool,
 }
 
 impl CmdOptions {
