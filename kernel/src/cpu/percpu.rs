@@ -9,7 +9,7 @@ extern crate alloc;
 use super::gdt_mut;
 use super::tss::{X86Tss, IST_DF};
 use crate::address::{Address, PhysAddr, VirtAddr};
-use crate::cpu::apic::ApicError;
+use crate::cpu::apic::{ApicError, CaaLazyEoi};
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
@@ -640,9 +640,23 @@ impl PerCpu {
         Ok(())
     }
 
-    pub fn update_apic_emulation(&self, vmsa: &mut VMSA) {
+    pub fn clear_pending_interrupts(&self) {
         if self.apic_emulation.get() {
-            self.apic.borrow_mut().present_interrupts(vmsa);
+            let mut vmsa_ref = self.guest_vmsa_ref();
+            let caa_lazy_eoi = CaaLazyEoi::new(vmsa_ref.caa_addr());
+            let vmsa = vmsa_ref.vmsa();
+            self.apic
+                .borrow_mut()
+                .check_delivered_interrupts(vmsa, &caa_lazy_eoi);
+        }
+    }
+
+    pub fn update_apic_emulation(&self, vmsa: &mut VMSA, caa_addr: Option<VirtAddr>) {
+        if self.apic_emulation.get() {
+            let caa_lazy_eoi = CaaLazyEoi::new(caa_addr);
+            self.apic
+                .borrow_mut()
+                .present_interrupts(vmsa, &caa_lazy_eoi);
         }
     }
 
@@ -652,16 +666,20 @@ impl PerCpu {
 
     pub fn read_apic_register(&self, register: u64) -> Result<u64, ApicError> {
         let mut vmsa_ref = self.guest_vmsa_ref();
+        let caa_lazy_eoi = CaaLazyEoi::new(vmsa_ref.caa_addr());
         let vmsa = vmsa_ref.vmsa();
         self.apic
             .borrow_mut()
-            .read_register(self.shared(), vmsa, register)
+            .read_register(self.shared(), vmsa, &caa_lazy_eoi, register)
     }
 
     pub fn write_apic_register(&self, register: u64, value: u64) -> Result<(), ApicError> {
         let mut vmsa_ref = self.guest_vmsa_ref();
+        let caa_lazy_eoi = CaaLazyEoi::new(vmsa_ref.caa_addr());
         let vmsa = vmsa_ref.vmsa();
-        self.apic.borrow_mut().write_register(vmsa, register, value)
+        self.apic
+            .borrow_mut()
+            .write_register(vmsa, &caa_lazy_eoi, register, value)
     }
 
     pub fn configure_apic_vector(&self, vector: u8, allowed: bool) {
