@@ -11,6 +11,7 @@ use super::tss::{X86Tss, IST_DF};
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::apic::ApicError;
 use crate::cpu::ghcb::current_ghcb;
+use crate::cpu::idt::common::INT_INJ_VECTOR;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::init_guest_vmsa;
 use crate::cpu::vmsa::vmsa_mut_ref_from_vaddr;
@@ -684,6 +685,10 @@ impl PerCpu {
         // Enable alternate injection if the hypervisor supports it.
         if SVSM_PLATFORM.as_dyn_ref().use_alternate_injection() {
             self.apic_emulation = true;
+
+            // Configure the interrupt injection vector.
+            let ghcb = unsafe { &mut *(*self.cpu_unsafe).ghcb };
+            ghcb.configure_interrupt_injection(INT_INJ_VECTOR)?;
         }
 
         let vaddr = allocate_new_vmsa(RMPFlags::GUEST_VMPL)?;
