@@ -363,6 +363,8 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 
     log::info!("COCONUT Secure Virtual Machine Service Module (SVSM)");
 
+    init_hypervisor_ghcb_features().expect("Failed to obtain hypervisor GHCB features");
+
     let mem_info = memory_info();
     print_memory_info(&mem_info);
 
@@ -394,8 +396,6 @@ pub extern "C" fn svsm_main() {
     // Uncomment the line below if you want to wait for
     // a remote GDB connection
     //debug_break();
-
-    init_hypervisor_ghcb_features().expect("Failed to obtain hypervisor GHCB features");
 
     this_cpu()
         .configure_hv_doorbell()
