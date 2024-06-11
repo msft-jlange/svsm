@@ -875,3 +875,138 @@ impl LocalApic {
             .expect("Failed to disable alterate injection");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::cell::Cell;
+
+    #[derive(PartialEq)]
+    enum TestInterruptEvent {
+        Nmi,
+        Interrupt(u8),
+    }
+
+    struct TestCpuState {
+        tpr: u8,
+        interrupt_event: Option<TestInterruptEvent>,
+        virtual_interrupt: Option<u8>,
+        interrupts_enabled: bool,
+        no_eoi_required: Cell<bool>,
+    }
+
+    impl TestCpuState {
+        pub fn new() -> Self {
+            Self {
+                tpr: 0,
+                interrupt_event: None,
+                virtual_interrupt: None,
+                interrupts_enabled: true,
+                no_eoi_required: Cell::new(false),
+            }
+        }
+    }
+
+    impl GuestCpuState for TestCpuState {
+        fn get_tpr(&self) -> u8 {
+            self.tpr
+        }
+
+        fn set_tpr(&mut self, tpr: u8) {
+            self.tpr = tpr
+        }
+
+        fn request_nmi(&mut self) {
+            // An NMI should never be requested without first clearing any
+            // pending interrupt injection.
+            assert!(!matches!(
+                self.interrupt_event,
+                Some(TestInterruptEvent::Interrupt(_))
+            ));
+            self.interrupt_event = Some(TestInterruptEvent::Nmi);
+        }
+
+        fn queue_interrupt(&mut self, irq: u8) {
+            self.virtual_interrupt = Some(irq);
+        }
+
+        fn try_deliver_interrupt_immediately(&mut self, irq: u8) -> bool {
+            // Immediate delivery should only be attempted if interrupts are
+            // enabled.
+            assert!(self.interrupts_enabled);
+            if let Some(event) = &self.interrupt_event {
+                if *event == TestInterruptEvent::Nmi {
+                    return false;
+                }
+            }
+
+            // Any requested interrupt must have a higher priority than
+            // TPR.
+            assert!((irq >> 4) > (self.tpr >> 4));
+            self.interrupt_event = Some(TestInterruptEvent::Interrupt(irq));
+            true
+        }
+
+        fn in_intr_shadow(&self) -> bool {
+            // Interrupt shadows are not tested, since they are functionally
+            // equivalent to having interrupts disabled, which is tested.
+            false
+        }
+
+        fn interrupts_enabled(&self) -> bool {
+            self.interrupts_enabled
+        }
+
+        fn check_and_clear_pending_nmi(&mut self) -> bool {
+            if let Some(event) = &self.interrupt_event {
+                if *event == TestInterruptEvent::Nmi {
+                    self.interrupt_event = None;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+
+        fn check_and_clear_pending_interrupt_event(&mut self) -> u8 {
+            if let Some(TestInterruptEvent::Interrupt(irq)) = &self.interrupt_event {
+                let pending_irq = *irq;
+                self.interrupt_event = None;
+                pending_irq
+            } else {
+                0
+            }
+        }
+
+        fn check_and_clear_pending_virtual_interrupt(&mut self) -> u8 {
+            if let Some(irq) = &self.virtual_interrupt {
+                let pending_irq = *irq;
+                self.virtual_interrupt = None;
+                pending_irq
+            } else {
+                0
+            }
+        }
+
+        fn disable_alternate_injection(&mut self) {}
+    }
+
+    impl ApicLazyEoi for TestCpuState {
+        fn no_eoi_required(&self) -> Result<bool, SvsmError> {
+            Ok(self.no_eoi_required.get())
+        }
+
+        fn set_no_eoi_required(&self, no_eoi_required: bool) -> Result<(), SvsmError> {
+            self.no_eoi_required.set(no_eoi_required);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_apic() {
+        let mut _test_state = TestCpuState::new();
+        let mut _apic = LocalApic::new();
+    }
+}
