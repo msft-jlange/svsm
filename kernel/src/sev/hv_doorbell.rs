@@ -3,7 +3,7 @@
 
 use crate::address::VirtAddr;
 use crate::cpu::idt::svsm::common_isr_handler;
-use crate::cpu::percpu::this_cpu;
+use crate::cpu::percpu::{get_tpr, this_cpu};
 use crate::error::SvsmError;
 use crate::mm::page_visibility::{make_page_private, make_page_shared};
 use crate::mm::virt_to_phys;
@@ -93,14 +93,26 @@ impl HVDoorbell {
             panic!("#MC exception delivered via #HV");
         }
 
-        // Consume interrupts as long as they are available.
+        // Consume interrupts as long as they are available and as long as
+        // they are appropriate for the current task priority.
+        let tpr = get_tpr();
+        let mut vector = self.vector.load(Ordering::Relaxed);
         loop {
-            // Consume any interrupt that may be present.
-            let vector = self.vector.swap(0, Ordering::Relaxed);
-            if vector == 0 {
+            // Check whether an interrupt is present.  If it is at or below
+            // the current task priority, then it will not be dispatched.
+            // If the interrupt is not dispatched, then the vector must remain
+            // in the #HV doorbell page so the hypervisor knows it has not been
+            // placed into service.
+            if (vector >> 4) <= tpr {
                 break;
             }
-            common_isr_handler(vector as usize);
+            match self
+                .vector
+                .compare_exchange_weak(vector, 0, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => common_isr_handler(vector as usize),
+                Err(new) => vector = new,
+            }
         }
 
         // Ignore per-VMPL events; these will be consumed when APIC emulation
