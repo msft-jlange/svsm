@@ -5,7 +5,7 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::cpu::percpu::this_cpu;
-use crate::cpu::{irqs_disable, irqs_enable};
+use crate::cpu::{irqs_disable, irqs_enable, lower_tpr, raise_tpr};
 use core::arch::asm;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -71,6 +71,36 @@ pub fn irqs_disabled() -> bool {
     !irqs_enabled()
 }
 
+/// Unconditionally set TPR.
+///
+/// Callers need to ensure that the selected TPR is appropriate for the
+/// current context.
+///
+/// * `tpr_value` - the new TPR value.
+#[inline(always)]
+pub fn raw_set_tpr(tpr_value: usize) {
+    unsafe {
+        asm!("mov {tpr}, %cr8",
+             tpr = in(reg) tpr_value,
+             options(att_syntax));
+    }
+}
+
+/// Query IRQ state on current CPU
+///
+/// # Returns
+///
+/// The current TPR.
+pub fn raw_get_tpr() -> usize {
+    unsafe {
+        let mut ret: usize;
+        asm!("movq %cr8, {tpr}",
+             tpr = out(reg) ret,
+             options(att_syntax));
+        ret
+    }
+}
+
 /// This structure keeps track of PerCpu IRQ states. It tracks the original IRQ
 /// state and how deep IRQ-disable calls have been nested. The use of atomics
 /// is necessary for interior mutability and to make state modifications safe
@@ -83,8 +113,10 @@ pub fn irqs_disabled() -> bool {
 pub struct IrqState {
     /// IRQ state when count was `0`
     state: AtomicBool,
-    /// Depth of IRQ-disabled nesting
-    count: AtomicIsize,
+    /// Depth of IRQ-disabled nesting.  Index 0 specifies the count of
+    /// IRQ disables and the remaining indices specify the nesting count
+    /// for eached raised TPR level.
+    counts: [AtomicIsize; 16],
     /// Make the type !Send + !Sync
     phantom: PhantomData<*const ()>,
 }
@@ -94,7 +126,7 @@ impl IrqState {
     pub fn new() -> Self {
         Self {
             state: AtomicBool::new(false),
-            count: AtomicIsize::new(0),
+            counts: Default::default(),
             phantom: PhantomData,
         }
     }
@@ -107,16 +139,16 @@ impl IrqState {
     /// calls with the number of `pop_nesting` calls.
     ///
     /// * `was_enabled` - indicates whether interrupts were enabled at the
-    /// time of nesting.  This may not be the current state of interrupts
-    /// because interrupts may have been disabled for architectural reasons
-    /// prior to his function being called.
+    ///   time of nesting.  This may not be the current state of interrupts
+    ///   because interrupts may have been disabled for architectural reasons
+    ///   prior to his function being called.
     ///
     /// # Returns
     ///
     /// The previous nesting level.
     pub fn push_nesting(&self, was_enabled: bool) {
         debug_assert!(irqs_disabled());
-        let val = self.count.fetch_add(1, Ordering::Relaxed);
+        let val = self.counts[0].fetch_add(1, Ordering::Relaxed);
 
         assert!(val >= 0);
 
@@ -150,7 +182,7 @@ impl IrqState {
     pub fn pop_nesting(&self) -> isize {
         debug_assert!(irqs_disabled());
 
-        let val = self.count.fetch_sub(1, Ordering::Relaxed);
+        let val = self.counts[0].fetch_sub(1, Ordering::Relaxed);
 
         assert!(val > 0);
 
@@ -178,7 +210,7 @@ impl IrqState {
     ///
     /// Levels of IRQ-disable nesting currently active
     pub fn count(&self) -> isize {
-        self.count.load(Ordering::Relaxed)
+        self.counts[0].load(Ordering::Relaxed)
     }
 
     /// Changes whether interrupts will be enabled when the nesting count
@@ -188,8 +220,55 @@ impl IrqState {
     /// and must ensure that the specified value is appropriate for the
     /// current environment.
     pub fn set_restore_state(&self, enabled: bool) {
-        assert!(self.count.load(Ordering::Relaxed) != 0);
+        assert!(self.counts[0].load(Ordering::Relaxed) != 0);
         self.state.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Increments TPR.
+    ///
+    /// The caller must ensure that a `raise_tpr()` call is followed by a
+    /// matching call to `lower_tpr()`.
+    ///
+    /// * `tpr_value` - The new TPR value.  Must be greater than or equal to
+    ///   the current TPR value.
+    #[inline(always)]
+    pub fn raise_tpr(&self, tpr_value: usize) {
+        assert!(tpr_value >= raw_get_tpr());
+        raw_set_tpr(tpr_value);
+
+        // Increment the count of requests to raise to this TPR to indicate
+        // the number of execution contexts that require this TPR.
+        self.counts[tpr_value].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Decrements TPR.
+    ///
+    /// The caller must ensure that a `lower` call balances a preceding
+    /// `raise` call to the indicated level.
+    ///
+    /// * `tpr_value` - The TPR from which the caller would like to lower.
+    ///   Must be less than or equal to the current TPR.
+    #[inline(always)]
+    pub fn lower_tpr(&self, tpr_value: usize) {
+        debug_assert!(tpr_value <= raw_get_tpr());
+
+        // Decrement the count of execution contexts requiring this raised
+        // TPR.
+        debug_assert!(self.counts[tpr_value].load(Ordering::Relaxed) > 0);
+        let count = self.counts[tpr_value].fetch_sub(1, Ordering::Relaxed);
+
+        if count == 0 {
+            // Find the highest TPR that is still required.
+            for new_tpr in (tpr_value..0).rev() {
+                if self.counts[new_tpr].load(Ordering::Relaxed) != 0 {
+                    raw_set_tpr(new_tpr);
+                    return;
+                }
+            }
+
+            // No TPR is still in use, so lower to zero.
+            raw_set_tpr(0);
+        }
     }
 }
 
@@ -197,8 +276,9 @@ impl Drop for IrqState {
     /// This struct should never be dropped. Add a debug check in case it is
     /// dropped anyway.
     fn drop(&mut self) {
-        let count = self.count.load(Ordering::Relaxed);
-        assert_eq!(count, 0);
+        for count in &self.counts {
+            assert_eq!(count.load(Ordering::Relaxed), 0);
+        }
     }
 }
 
@@ -208,7 +288,7 @@ impl Drop for IrqState {
 ///
 /// The struct implements the `Default` and `Drop` traits for easy use.
 #[derive(Debug)]
-#[must_use = "if unused previous IRQ state will be immediatly restored"]
+#[must_use = "if unused previous IRQ state will be immediately restored"]
 pub struct IrqGuard {
     /// Make the type !Send + !Sync
     phantom: PhantomData<*const ()>,
@@ -237,6 +317,39 @@ impl Drop for IrqGuard {
         // The irqs_enabled() call matches the irqs_disabled() call during
         // struct creation.
         irqs_enable();
+    }
+}
+
+/// A TPR guard which raises TPR upon creation.  When the guard goes out of
+/// scope, TPR is lowered to the highest active TPR.
+///
+/// The struct implements the `Drop` trait for easy use.
+#[derive(Debug, Default)]
+#[must_use = "if unused previous TPR will be immediately restored"]
+pub struct TprGuard {
+    tpr_value: usize,
+
+    /// Make the type !Send + !Sync
+    phantom: PhantomData<*const ()>,
+}
+
+impl TprGuard {
+    pub fn raise(tpr_value: usize) -> Self {
+        // SAFETY: Safe because the struct implements `Drop, which restores
+        // TPR state.
+        raise_tpr(tpr_value);
+
+        Self {
+            tpr_value,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl Drop for TprGuard {
+    fn drop(&mut self) {
+        // Lower TPR from the value to which it was raised.
+        lower_tpr(self.tpr_value);
     }
 }
 

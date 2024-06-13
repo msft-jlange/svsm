@@ -402,7 +402,7 @@ impl PerCpu {
     /// `pop_nesting()` call.
     #[inline(always)]
     pub fn irqs_push_nesting(&self, was_enabled: bool) {
-        let _ = self.irq_state.push_nesting(was_enabled);
+        self.irq_state.push_nesting(was_enabled);
     }
 
     /// Reduces IRQ-disable nesting level on the current CPU without restoring
@@ -424,6 +424,28 @@ impl PerCpu {
     /// Current nesting depth of irq_disable() calls.
     pub fn irq_nesting_count(&self) -> isize {
         self.irq_state.count()
+    }
+
+    /// Raises TPR on the current CPU.  Keeps track of the nesting level.
+    ///
+    /// The caller must ensure that every `raise_tpr()` call is followed by a
+    /// matching call to `lower_tpr()`.
+    #[inline(always)]
+    pub fn raise_tpr(&self, tpr_value: usize) {
+        self.irq_state.raise_tpr(tpr_value);
+    }
+
+    /// Lowers TPR from the current level to the new level required by the
+    /// current nesting state.
+    ///
+    /// The caller must ensure that a `lower_tpr()` call balances a preceding
+    /// `raise_tpr()` call to the indicated level.
+    ///
+    /// * `tpr_value` - The TPR from which the caller would like to lower.
+    ///   Must be less than or equal to the current TPR.
+    #[inline(always)]
+    pub fn lower_tpr(&self, tpr_value: usize) {
+        self.irq_state.lower_tpr(tpr_value);
     }
 
     /// Sets up the CPU-local GHCB page.
@@ -1020,6 +1042,28 @@ pub fn irqs_enable() {
 /// Current nesting depth of irq_disable() calls.
 pub fn irq_nesting_count() -> isize {
     this_cpu().irq_nesting_count()
+}
+
+/// Raises TPR on the current CPU.  Keeps track of the nesting level.
+///
+/// The caller must ensure that every `raise_tpr()` call is followed by a
+/// matching call to `lower_tpr()`.
+#[inline(always)]
+pub fn raise_tpr(tpr_value: usize) {
+    this_cpu().raise_tpr(tpr_value);
+}
+
+/// Lowers TPR from the current level to the new level required by the
+/// current nesting state.
+///
+/// The caller must ensure that a `lower_tpr()` call balances a preceding
+/// `raise_tpr()` call to the indicated level.
+///
+/// * `tpr_value` - The TPR from which the caller would like to lower.
+///   Must be less than or equal to the current TPR.
+#[inline(always)]
+pub fn lower_tpr(tpr_value: usize) {
+    this_cpu().lower_tpr(tpr_value);
 }
 
 /// Gets the GHCB for this CPU.
