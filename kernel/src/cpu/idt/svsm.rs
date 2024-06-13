@@ -23,7 +23,7 @@ use crate::debug::gdbstub::svsm_gdbstub::handle_debug_exception;
 use crate::mm::GuestPtr;
 use crate::platform::SVSM_PLATFORM;
 use crate::task::{is_task_fault, terminate};
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 use crate::syscall::*;
 use syscall::*;
@@ -344,11 +344,40 @@ pub extern "C" fn common_isr_handler_entry(vector: usize) {
     cpu.irqs_pop_nesting();
 }
 
-pub fn common_isr_handler(_vector: usize) {
-    // Interrupt injection requests currently require no processing; they occur
-    // simply to ensure an exit from the guest.
+pub fn common_isr_handler(vector: usize) {
+    // Set TPR based on the vector being handled and reenable interrupts to
+    // permit delivery of higher priority interrupts.  Because this routine
+    // dispatches interrupts which should only be observable if interrupts
+    // are enabled, the IRQ nesting count must be zero at this point.
+    let this_tpr = vector >> 4;
+    let previous_tpr = unsafe {
+        let mut cr8: u64;
+        asm!("movq %cr8, {1}",
+             "movq {0}, %cr8",
+             in(reg) this_tpr,
+             out(reg) cr8,
+             options(att_syntax));
+        cr8
+    };
 
-    // Treat any unhandled interrupt as a spurious interrupt.
+    let cpu = this_cpu();
+    cpu.irqs_enable();
+
+    // Treat any unhandled interrupt as a spurious interrupt.  Interrupt
+    // injection requests currently require no processing; they occur simply
+    // to ensure an exit from the guest.
+
+    // Disable interrupts before restoring TPR.
+    cpu.irqs_disable();
+    unsafe {
+        asm!("movq {0}, %cr8",
+             in(reg) previous_tpr,
+             options(att_syntax));
+    }
+
+    // Perform the EOI cycle after the interrupt processing state has been
+    // restored so that recurrent interrupts will not introduce recursion at
+    // this point.
     SVSM_PLATFORM.eoi();
 }
 
