@@ -21,7 +21,7 @@ use crate::debug::gdbstub::svsm_gdbstub::handle_debug_exception;
 use crate::platform::SVSM_PLATFORM;
 use crate::task::{is_task_fault, terminate};
 
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 use crate::syscall::*;
 use syscall::*;
@@ -253,11 +253,43 @@ pub extern "C" fn ex_handler_panic(ctx: &mut X86ExceptionContext, vector: usize)
 }
 
 #[no_mangle]
-pub extern "C" fn common_isr_handler(_vector: usize) {
-    // Interrupt injection requests currently require no processing; they occur
-    // simply to ensure an exit from the guest.
+pub extern "C" fn common_isr_handler(vector: usize) {
+    // Set TPR based on the vector being handled and reenable interrupts to
+    // permit delivery of higher priority interrupts.
+    let mut rflags: u64;
+    let this_tpr = vector >> 4;
+    let mut previous_tpr: u64;
+    unsafe {
+        asm!("pushfq",
+             "pop %rdx",
+             "movq %cr8, %rax",
+             "movq %rcx, %cr8",
+             "sti",
+             in("rcx") this_tpr,
+             out("rax") previous_tpr,
+             out("rdx") rflags,
+             options(att_syntax));
+    }
 
-    // Treat any unhandled interrupt as a spurious interrupt.
+    // Treat any unhandled interrupt as a spurious interrupt.  Interrupt
+    // injection requests currently require no processing; they occur simply
+    // to ensure an exit from the guest.
+
+    unsafe {
+        // Disable interrupts if they were not previously enabled and restore
+        // TPR.
+        if (rflags & 0x200) == 0 {
+            asm!("cli");
+        }
+
+        asm!("movq %rax, %cr8",
+             in("rax") previous_tpr,
+             options(att_syntax));
+    }
+
+    // Perform the EOI cycle after the interrupt processing state has been
+    // restored so that recurrent interrupts will not introduce recursion at
+    // this point.
     SVSM_PLATFORM.as_dyn_ref().eoi();
 }
 

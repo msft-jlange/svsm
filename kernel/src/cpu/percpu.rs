@@ -34,6 +34,7 @@ use crate::types::{PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_F
 use crate::utils::MemoryRegion;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::arch::asm;
 use core::cell::{Cell, OnceCell, Ref, RefCell, RefMut, UnsafeCell};
 use core::mem::size_of;
 use core::ptr;
@@ -57,6 +58,49 @@ impl PerCpuInfo {
 
     pub fn as_cpu_ref(&self) -> &'static PerCpuShared {
         self.cpu_shared
+    }
+}
+
+pub fn get_tpr() -> u8 {
+    unsafe {
+        let mut ret: u64;
+        asm!("movq %cr8, %rax",
+             out("rax") ret,
+             options(att_syntax));
+        ret as u8
+    }
+}
+
+fn set_tpr(tpr: u8) {
+    unsafe {
+        asm!("movq %rax, %cr8",
+             in("eax") tpr as u32,
+             options(att_syntax));
+    }
+}
+
+#[derive(Debug)]
+pub struct TprRef {
+    previous_tpr: u8,
+}
+
+impl TprRef {
+    fn new(previous_tpr: u8) -> Self {
+        Self { previous_tpr }
+    }
+}
+
+impl Drop for TprRef {
+    fn drop(&mut self) {
+        // Because TPR changes are inherently nested through the use of the
+        // TPR reference, it should never be possible for a restore operation
+        // to raise the value of TPR.
+        assert!(self.previous_tpr <= get_tpr());
+        set_tpr(self.previous_tpr);
+
+        // Process any pending #HV doorbell events, since it is possible that
+        // a previously delivered interrupt was deferred due to task priority.
+        this_cpu().process_pending_interrupts();
     }
 }
 
@@ -384,6 +428,15 @@ impl PerCpu {
             .unwrap_or(ptr::null())
     }
 
+    pub fn raise_tpr(&self, tpr: u8) -> TprRef {
+        let current_tpr = get_tpr();
+        if tpr < current_tpr {
+            panic!("Attempting to raise TPR to a lower value!");
+        }
+        set_tpr(tpr);
+        TprRef::new(current_tpr)
+    }
+
     pub fn get_top_of_stack(&self) -> VirtAddr {
         self.init_stack.get().unwrap()
     }
@@ -470,6 +523,12 @@ impl PerCpu {
             self.setup_hv_doorbell()?;
         }
         Ok(())
+    }
+
+    fn process_pending_interrupts(&self) {
+        if let Some(hv_doorbell) = self.hv_doorbell() {
+            hv_doorbell.process_pending_events();
+        }
     }
 
     fn setup_tss(&self) {
