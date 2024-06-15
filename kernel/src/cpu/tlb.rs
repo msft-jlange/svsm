@@ -50,6 +50,20 @@ pub fn flush_tlb_global_sync() {
     do_tlbsync();
 }
 
+pub fn flush_tlb_global_percpu() {
+    unsafe {
+        asm!(
+            "movq %cr4, %rax",
+            "movl 0x80, %edx", // CR4_PGE
+            "not %rdx",
+            "andq %rax, %rdx",
+            "movq %rdx, %cr4",
+            "movq %rax, %cr4",
+            options(att_syntax)
+        );
+    }
+}
+
 pub fn flush_address(va: VirtAddr) {
     let rax: u64 = (va.page_align().bits() as u64)
         | INVLPGB_VALID_VA
