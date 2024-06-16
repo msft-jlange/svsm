@@ -37,8 +37,12 @@ pub fn efer_init() {
     let mut efer = read_efer();
 
     if cpu_has_nx() {
-        efer.insert(EFERFlags::NXE);
+        // All processors that are capable of virtualization will support
+        // no-execute table entries, so there is no reason to support any
+        // processor that does not enumerate NX capability.
+        panic!("CPU does not support NX");
     }
 
+    efer.insert(EFERFlags::NXE);
     write_efer(efer);
 }
