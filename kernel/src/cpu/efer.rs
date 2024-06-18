@@ -37,7 +37,7 @@ pub fn write_efer(efer: EFERFlags) {
 pub fn efer_init(platform: &dyn SvsmPlatform) {
     let mut efer = read_efer();
 
-    if cpu_has_nx(platform) {
+    if !cpu_has_nx(platform) {
         // All processors that are capable of virtualization will support
         // no-execute table entries, so there is no reason to support any
         // processor that does not enumerate NX capability.
