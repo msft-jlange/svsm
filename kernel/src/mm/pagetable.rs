@@ -4,6 +4,8 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+use core::arch::asm;
+
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::control_regs::write_cr3;
 use crate::cpu::flush_tlb_global_sync;
@@ -237,7 +239,11 @@ impl PageTable {
     }
 
     fn allocate_page_table() -> Result<*mut PTPage, SvsmError> {
-        let ptr = allocate_zeroed_page()?;
+        let ptr_x = allocate_zeroed_page();
+        if ptr_x.is_err() {
+            unsafe{asm!("int 32h")}
+        }
+        let ptr = ptr_x?;
         Ok(ptr.as_mut_ptr::<PTPage>())
     }
 
@@ -623,7 +629,7 @@ impl PageTable {
                 continue;
             }
 
-            self.map_4k(vaddr, paddr, flags)?;
+            self.map_4k(vaddr, paddr, flags).map_err(|e|unsafe{asm!("int 40h");e})?;
             vaddr = vaddr + PAGE_SIZE;
             paddr = paddr + PAGE_SIZE;
         }

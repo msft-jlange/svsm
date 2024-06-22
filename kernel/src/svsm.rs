@@ -7,6 +7,8 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+use core::arch::asm;
+
 use svsm::fw_meta::{print_fw_meta, validate_fw_memory, SevFWMetaData};
 
 use bootlib::kernel_launch::KernelLaunchInfo;
@@ -331,6 +333,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     // aligned pointer.
     let bsp_percpu = PerCpu::alloc(0).expect("Failed to allocate BSP per-cpu data");
 
+    unsafe{asm!("int 30h")}
     bsp_percpu
         .setup(platform)
         .expect("Failed to setup BSP per-cpu area");

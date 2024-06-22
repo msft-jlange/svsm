@@ -4,6 +4,8 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+use core::arch::asm;
+
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::config::SvsmConfig;
 use crate::error::SvsmError;
@@ -59,6 +61,7 @@ pub fn init_page_table(
         let vregion = MemoryRegion::new(vaddr_start, segment_len);
         pgtable
             .map_region(vregion, phys, flags)
+            .map_err(|e| unsafe{asm!("int 50h"); e})
             .expect("Failed to map kernel ELF segment");
 
         phys = phys + segment_len;
@@ -73,6 +76,7 @@ pub fn init_page_table(
                 PhysAddr::from(launch_info.igvm_params_phys_addr),
                 PTEntryFlags::data(),
             )
+            .map_err(|e| unsafe{asm!("int 51h"); e})
             .expect("Failed to map IGVM parameters");
     }
 
@@ -81,12 +85,14 @@ pub fn init_page_table(
         VirtAddr::from(launch_info.heap_area_virt_start),
         launch_info.heap_area_size as usize,
     );
+    unsafe{asm!("int 52h")}
     pgtable
         .map_region(
             heap_vregion,
             PhysAddr::from(launch_info.heap_area_phys_start),
             PTEntryFlags::data(),
         )
+        .map_err(|e| unsafe{asm!("int 53h"); e})
         .expect("Failed to map heap");
 
     pgtable.load();
