@@ -5,6 +5,7 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::error::SvsmError;
+use crate::error::ApicError;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
@@ -38,6 +39,8 @@ impl From<SvsmResultCode> for u64 {
     }
 }
 
+const SVSM_ERR_APIC_CANNOT_REGISTER: u64 = 0;
+
 #[derive(Debug, Clone, Copy)]
 pub enum SvsmReqError {
     RequestError(SvsmResultCode),
@@ -65,6 +68,12 @@ impl SvsmReqError {
     pub fn protocol(code: u64) -> Self {
         Self::RequestError(SvsmResultCode::PROTOCOL_BASE(code))
     }
+    pub fn translate_apic_error(e: ApicError) -> Self {
+        match e {
+            ApicError::Emulation => Self::invalid_parameter(),
+            ApicError::Registration => Self::protocol(SVSM_ERR_APIC_CANNOT_REGISTER),
+        }
+    }
 }
 
 impl From<SvsmError> for SvsmReqError {
@@ -75,6 +84,7 @@ impl From<SvsmError> for SvsmReqError {
             // to the guest as protocol-specific errors.
             SvsmError::SevSnp(e) => Self::protocol(e.ret()),
             SvsmError::InvalidAddress => Self::invalid_address(),
+            SvsmError::Apic(e) => Self::translate_apic_error(e),
             // Use a fatal error for now
             _ => Self::FatalError(err),
         }

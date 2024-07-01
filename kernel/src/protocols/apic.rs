@@ -19,8 +19,6 @@ pub const APIC_PROTOCOL: u32 = 3;
 pub const APIC_PROTOCOL_VERSION_MIN: u32 = 1;
 pub const APIC_PROTOCOL_VERSION_MAX: u32 = 1;
 
-const SVSM_ERR_APIC_CANNOT_REGISTER: u64 = 0;
-
 fn apic_query_features(params: &mut RequestParams) -> Result<(), SvsmReqError> {
     // No features are supported beyond the base feature set.
     params.rcx = 0;
@@ -47,7 +45,7 @@ fn apic_configure(params: &RequestParams) -> Result<(), SvsmReqError> {
             // this will not cause any change to the state of the current CPU.
             return match platform.change_apic_registration_state(true) {
                 Ok(_) => Ok(()),
-                Err(_) => Err(SvsmReqError::protocol(SVSM_ERR_APIC_CANNOT_REGISTER)),
+                Err(e) => Err(SvsmReqError::from(e)),
             };
         }
 
@@ -71,7 +69,7 @@ fn apic_read_register(params: &mut RequestParams) -> Result<(), SvsmReqError> {
     }
     let value = cpu
         .read_apic_register(params.rcx)
-        .map_err(|_| SvsmReqError::invalid_parameter())?;
+        .map_err(|e| SvsmReqError::from(e))?;
     params.rdx = value;
     Ok(())
 }
@@ -82,7 +80,7 @@ fn apic_write_register(params: &RequestParams) -> Result<(), SvsmReqError> {
         return Err(SvsmReqError::invalid_request());
     }
     cpu.write_apic_register(params.rcx, params.rdx)
-        .map_err(|_| SvsmReqError::invalid_parameter())
+        .map_err(|e| SvsmReqError::from(e))
 }
 
 fn apic_configure_vector(params: &RequestParams) -> Result<(), SvsmReqError> {
