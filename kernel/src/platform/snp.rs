@@ -4,7 +4,7 @@
 //
 // Author: Jon Lange <jlange@microsoft.com>
 
-use crate::address::{PhysAddr, VirtAddr};
+use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::console::init_console;
 use crate::cpu::cpuid::{cpuid_table, CpuidResult};
 use crate::cpu::percpu::{current_ghcb, this_cpu, PerCpu};
@@ -24,6 +24,7 @@ use crate::types::PageSize;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 use crate::utils::MemoryRegion;
 
+use core::arch::asm;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 static CONSOLE_IO: SVSMIOPort = SVSMIOPort::new();
@@ -46,6 +47,42 @@ impl Default for SnpPlatform {
     fn default() -> Self {
         Self::new()
     }
+}
+
+const INVLPGB_VALID_VA: u64 = 1u64 << 0;
+//const INVLPGB_VALID_PCID: u64 = 1u64 << 1;
+const INVLPGB_VALID_ASID: u64 = 1u64 << 2;
+const INVLPGB_VALID_GLOBAL: u64 = 1u64 << 3;
+
+#[inline]
+fn do_invlpgb(rax: u64, rcx: u64, rdx: u64) {
+    unsafe {
+        asm!(".byte 0x0f, 0x01, 0xfe",
+             in("rax") rax,
+             in("rcx") rcx,
+             in("rdx") rdx,
+             options(att_syntax));
+    }
+}
+
+#[inline]
+fn do_tlbsync() {
+    unsafe {
+        asm!(".byte 0x0f, 0x01, 0xff", options(att_syntax));
+    }
+}
+
+fn flush_tlb_global() {
+    let rax: u64 = INVLPGB_VALID_ASID | INVLPGB_VALID_GLOBAL;
+    do_invlpgb(rax, 0, 0);
+}
+
+fn flush_address(va: VirtAddr) {
+    let rax: u64 = (va.page_align().bits() as u64)
+        | INVLPGB_VALID_VA
+        | INVLPGB_VALID_ASID
+        | INVLPGB_VALID_GLOBAL;
+    do_invlpgb(rax, 0, 0);
 }
 
 impl SvsmPlatform for SnpPlatform {
@@ -224,5 +261,14 @@ impl SvsmPlatform for SnpPlatform {
         let (vmsa_pa, sev_features) = cpu.alloc_svsm_vmsa(*VTOM as u64, start_rip)?;
 
         current_ghcb().ap_create(vmsa_pa, cpu.get_apic_id().into(), 0, sev_features)
+    }
+
+    fn flush_tlb(&self, va: Option<VirtAddr>) {
+        // This operation requires IPI support.
+        match va {
+            None => flush_tlb_global(),
+            Some(addr) => flush_address(addr),
+        }
+        do_tlbsync();
     }
 }

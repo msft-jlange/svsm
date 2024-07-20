@@ -106,6 +106,10 @@ pub trait SvsmPlatform {
 
     /// Start an additional processor.
     fn start_cpu(&self, cpu: &PerCpu, start_rip: u64) -> Result<(), SvsmError>;
+
+    /// Perform a system-wide TLB flush.  If no address is specified, a global
+    /// flush will be performed.
+    fn flush_tlb(&self, va: Option<VirtAddr>);
 }
 
 //FIXME - remove Copy trait

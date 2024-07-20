@@ -124,4 +124,9 @@ impl SvsmPlatform for TdpPlatform {
     fn start_cpu(&self, _cpu: &PerCpu, _start_rip: u64) -> Result<(), SvsmError> {
         todo!();
     }
+
+    fn flush_tlb(&self, _va: Option<VirtAddr>) {
+        // This operation requires IPI support.
+        todo!();
+    }
 }
