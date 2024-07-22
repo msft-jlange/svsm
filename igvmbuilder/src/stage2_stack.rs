@@ -33,6 +33,13 @@ impl Stage2Stack {
             igvm_params: gpa_map.igvm_param_block.get_start() as u32,
             vtom,
             platform_type: 0,
+            cpuid_page: gpa_map.cpuid_page.get_start() as u32,
+            secrets_page: gpa_map.secrets_page.get_start() as u32,
+
+            // The stage2 heap starts at 64 KB and extends for 128 KB.
+            heap_start: 0x10000,
+            heap_size: 0x20000,
+
         };
         Self { stage2_stack }
     }

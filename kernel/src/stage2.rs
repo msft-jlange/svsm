@@ -13,7 +13,7 @@ use bootlib::kernel_launch::{KernelLaunchInfo, Stage2LaunchInfo};
 use bootlib::platform::SvsmPlatformType;
 use core::arch::asm;
 use core::panic::PanicInfo;
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::addr_of_mut;
 use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
 use elf::ElfError;
@@ -41,15 +41,12 @@ use svsm::types::{PageSize, PAGE_SIZE, PAGE_SIZE_2M};
 use svsm::utils::{halt, is_aligned, MemoryRegion};
 
 extern "C" {
-    pub static heap_start: u8;
-    pub static heap_end: u8;
     pub static mut pgtable: PageTable;
-    pub static CPUID_PAGE: SnpCpuidTable;
 }
 
-fn setup_stage2_allocator() {
-    let vstart = unsafe { VirtAddr::from(addr_of!(heap_start)).page_align_up() };
-    let vend = unsafe { VirtAddr::from(addr_of!(heap_end)).page_align() };
+fn setup_stage2_allocator(launch_info: &Stage2LaunchInfo) {
+    let vstart = VirtAddr::from(launch_info.heap_start as u64);
+    let vend = vstart + launch_info.heap_size as usize;
     let pstart = PhysAddr::from(vstart.bits()); // Identity mapping
     let nr_pages = (vend - vstart) / PAGE_SIZE;
 
@@ -91,11 +88,17 @@ fn setup_env(
         VirtAddr::from(640 * 1024usize),
         PhysAddr::null(),
     );
-    register_cpuid_table(unsafe { &CPUID_PAGE });
+
+    let cpuid_page = unsafe {
+        let ptr = VirtAddr::from(launch_info.cpuid_page as u64).as_ptr::<SnpCpuidTable>();
+        &*ptr
+    };
+
+    register_cpuid_table(cpuid_page);
     paging_init_early(platform, launch_info.vtom).expect("Failed to initialize early paging");
 
     set_init_pgtable(PageTableRef::shared(unsafe { addr_of_mut!(pgtable) }));
-    setup_stage2_allocator();
+    setup_stage2_allocator(launch_info);
     init_percpu(platform).expect("Failed to initialize per-cpu area");
 
     // Init IDT again with handlers requiring GHCB (eg. #VC handler)

@@ -33,14 +33,6 @@ SECTIONS
 		. = ALIGN(16);
 		_ebss = .;
 	}
-	. = ALIGN(4096);
-	heap_start = .;
-
-	. = 632k;
-	heap_end = .;
-	SECRETS_PAGE = .;
-	. = 636k;
-	CPUID_PAGE = .;
 }
 
 ENTRY(startup_32)
