@@ -55,7 +55,7 @@ pub struct GpaMap {
     pub low_memory: GpaRange,
     pub stage2_stack: GpaRange,
     pub stage2_image: GpaRange,
-    pub stage2_free: GpaRange,
+    pub below_1mb: GpaRange,
     pub secrets_page: GpaRange,
     pub cpuid_page: GpaRange,
     pub kernel_elf: GpaRange,
@@ -75,14 +75,14 @@ impl GpaMap {
     ) -> Result<Self, Box<dyn Error>> {
         //   0x000000-0x00EFFF: zero-filled (must be pre-validated)
         //   0x00F000-0x00FFFF: initial stage 2 stack page
-        //   0x010000-0x0nnnnn: stage 2 image
-        //   0x0nnnnn-0x09DFFF: zero-filled (must be pre-validated)
+        //   0x010000-0x09DFFF: zero-filled (must be pre-validated)
         //   0x09E000-0x09EFFF: Secrets page
         //   0x09F000-0x09FFFF: CPUID page
-        //   0x100000-0x1nnnnn: kernel
-        //   0x1nnnnn-0x1nnnnn: filesystem
-        //   0x1nnnnn-0x1nnnnn: IGVM parameter block
-        //   0x1nnnnn-0x1nnnnn: general and memory map parameter pages
+        //   0x800000-0xnnnnnn: stage2 image
+        //   0xnnnnnn-0xnnnnnn: kernel image
+        //   0xnnnnnn-0xnnnnnn: filesystem
+        //   0xnnnnnn-0xnnnnnn: IGVM parameter block
+        //   0xnnnnnn-0xnnnnnn: general and memory map parameter pages
         //   0xFFnn0000-0xFFFFFFFF: [TDX stage 1 +] OVMF firmware (QEMU only, if specified)
 
         let stage1_image = if let Some(stage1) = &options.tdx_stage1 {
@@ -107,35 +107,9 @@ impl GpaMap {
             0
         };
 
-        let stage2_image = GpaRange::new(0x10000, stage2_len as u64)?;
+        let stage2_image = GpaRange::new(0x100000, stage2_len as u64)?;
 
-        // Calculate the firmware range
-        let firmware_range = if let Some(firmware) = firmware {
-            let fw_start = firmware.get_fw_info().start as u64;
-            let fw_size = firmware.get_fw_info().size as u64;
-            GpaRange::new(fw_start, fw_size)?
-        } else {
-            GpaRange::new(0, 0)?
-        };
-
-        let kernel_address = match options.hypervisor {
-            Hypervisor::Qemu => {
-                // Plan to load the kernel image at a base address of 1 MB unless it must
-                // be relocated due to firmware.
-                1 << 20
-            }
-            Hypervisor::HyperV => {
-                // Load the kernel image after the firmware, but now lower than
-                // 1 MB.
-                let firmware_end = firmware_range.get_end();
-                let addr_1mb = 1 << 20;
-                if firmware_end < addr_1mb {
-                    addr_1mb
-                } else {
-                    firmware_end
-                }
-            }
-        };
+        let kernel_address = stage2_image.get_end();
         let kernel_elf = GpaRange::new(kernel_address, kernel_elf_len as u64)?;
         let kernel_fs = GpaRange::new(kernel_elf.get_end(), kernel_fs_len as u64)?;
 
@@ -178,7 +152,7 @@ impl GpaMap {
             low_memory: GpaRange::new(0, 0xf000)?,
             stage2_stack: GpaRange::new_page(0xf000)?,
             stage2_image,
-            stage2_free: GpaRange::new(stage2_image.get_end(), 0x9e000 - &stage2_image.get_end())?,
+            below_1mb: GpaRange::new(0x10000, 0x8e000)?,
             secrets_page: GpaRange::new_page(0x9e000)?,
             cpuid_page: GpaRange::new_page(0x9f000)?,
             kernel_elf,
