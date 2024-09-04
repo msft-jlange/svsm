@@ -11,7 +11,7 @@ use crate::cpu::percpu::{current_ghcb, this_cpu, PerCpu};
 use crate::error::ApicError::Registration;
 use crate::error::SvsmError;
 use crate::io::IOPort;
-use crate::platform::{PageEncryptionMasks, PageStateChangeOp, SvsmPlatform};
+use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PlatformEnvironment, SvsmPlatform};
 use crate::serial::SerialPort;
 use crate::sev::hv_doorbell::current_hv_doorbell;
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, verify_ghcb_version, GHCBHvFeatures};
@@ -34,21 +34,17 @@ static VTOM: ImmutAfterInitCell<usize> = ImmutAfterInitCell::uninit();
 static APIC_EMULATION_REG_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, Debug)]
-pub struct SnpPlatform {}
+pub struct SnpPlatform<'a, T: PlatformEnvironment> {
+    _env: &'a T,
+}
 
-impl SnpPlatform {
-    pub fn new() -> Self {
-        Self {}
+impl<'a, T: PlatformEnvironment> SnpPlatform<'a, T> {
+    pub fn new(env: &'a T) -> Self {
+        Self { _env: env }
     }
 }
 
-impl Default for SnpPlatform {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SvsmPlatform for SnpPlatform {
+impl<T: PlatformEnvironment> SvsmPlatform for SnpPlatform<'_, T> {
     fn env_setup(&mut self, _debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError> {
         sev_status_init();
         VTOM.init(&vtom).map_err(|_| SvsmError::PlatformInit)?;

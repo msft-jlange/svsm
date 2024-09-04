@@ -13,17 +13,19 @@ use crate::platform::native::NativePlatform;
 use crate::platform::snp::SnpPlatform;
 use crate::platform::tdp::TdpPlatform;
 use crate::types::PageSize;
-use crate::utils::immut_after_init::ImmutAfterInitCell;
+use crate::utils::immut_after_init::ImmutAfterInitRef;
 use crate::utils::MemoryRegion;
 
 use bootlib::platform::SvsmPlatformType;
 
 pub mod guest_cpu;
+pub mod kernel;
 pub mod native;
 pub mod snp;
+pub mod stage2;
 pub mod tdp;
 
-pub static SVSM_PLATFORM: ImmutAfterInitCell<SvsmPlatformCell> = ImmutAfterInitCell::uninit();
+pub static SVSM_PLATFORM: ImmutAfterInitRef<'_, dyn SvsmPlatform> = ImmutAfterInitRef::uninit();
 
 #[derive(Clone, Copy, Debug)]
 pub struct PageEncryptionMasks {
@@ -41,9 +43,14 @@ pub enum PageStateChangeOp {
     Unsmash,
 }
 
+/// This defines an abstraction to encapsulate services required by the
+/// platform object, where the services may be implemented differently in
+/// stage2 and the kernel.
+pub trait PlatformEnvironment: Send + Sync {}
+
 /// This defines a platform abstraction to permit the SVSM to run on different
 /// underlying architectures.
-pub trait SvsmPlatform {
+pub trait SvsmPlatform: Send + Sync {
     /// Performs basic early initialization of the runtime environment.
     fn env_setup(&mut self, debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError>;
 
@@ -110,18 +117,18 @@ pub trait SvsmPlatform {
 
 //FIXME - remove Copy trait
 #[derive(Clone, Copy, Debug)]
-pub enum SvsmPlatformCell {
-    Snp(SnpPlatform),
+pub enum SvsmPlatformCell<'a, T: PlatformEnvironment> {
+    Snp(SnpPlatform<'a, T>),
     Tdp(TdpPlatform),
     Native(NativePlatform),
 }
 
-impl SvsmPlatformCell {
-    pub fn new(platform_type: SvsmPlatformType) -> Self {
+impl<'a, T: PlatformEnvironment> SvsmPlatformCell<'a, T> {
+    pub fn new(platform_type: SvsmPlatformType, env: &'a T) -> Self {
         match platform_type {
-            SvsmPlatformType::Native => SvsmPlatformCell::Native(NativePlatform::new()),
-            SvsmPlatformType::Snp => SvsmPlatformCell::Snp(SnpPlatform::new()),
-            SvsmPlatformType::Tdp => SvsmPlatformCell::Tdp(TdpPlatform::new()),
+            SvsmPlatformType::Native => SvsmPlatformCell::Native(NativePlatform::new(env)),
+            SvsmPlatformType::Snp => SvsmPlatformCell::Snp(SnpPlatform::new(env)),
+            SvsmPlatformType::Tdp => SvsmPlatformCell::Tdp(TdpPlatform::new(env)),
         }
     }
 

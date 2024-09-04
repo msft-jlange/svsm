@@ -259,7 +259,7 @@ pub extern "C" fn common_isr_handler(_vector: usize) {
     // simply to ensure an exit from the guest.
 
     // Treat any unhandled interrupt as a spurious interrupt.
-    SVSM_PLATFORM.as_dyn_ref().eoi();
+    SVSM_PLATFORM.get().eoi();
 }
 
 global_asm!(include_str!("entry.S"), options(att_syntax));

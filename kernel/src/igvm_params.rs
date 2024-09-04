@@ -163,7 +163,7 @@ impl IgvmParams<'_> {
         // host-provided IGVM parameters, which requires the pages to be
         // validated.  Since the memory was not declared as part of the guest
         // firmware image, the pages must be validated here.
-        let platform = SVSM_PLATFORM.as_dyn_ref();
+        let platform = SVSM_PLATFORM.get();
         if self.page_state_change_required() {
             platform.page_state_change(
                 mem_map_region,

@@ -40,6 +40,7 @@ use svsm::mm::memory::{init_memory_map, write_guest_memory_map};
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::virtualrange::virt_log_usage;
 use svsm::mm::{init_kernel_mapping_info, FixedAddressMappingRange, PerCPUPageMappingGuard};
+use svsm::platform::kernel::KernelEnvironment;
 use svsm::platform::{SvsmPlatformCell, SVSM_PLATFORM};
 use svsm::requests::{request_loop, request_processing_main, update_mappings};
 use svsm::sev::utils::{rmp_adjust, RMPFlags};
@@ -57,6 +58,9 @@ use svsm::mm::validate::{init_valid_bitmap_ptr, migrate_valid_bitmap};
 extern "C" {
     pub static bsp_stack_end: u8;
 }
+
+pub static KERNEL_SVSM_PLATFORM: ImmutAfterInitCell<SvsmPlatformCell<'static, KernelEnvironment>> =
+    ImmutAfterInitCell::uninit();
 
 /*
  * Launch protocol:
@@ -295,7 +299,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
         .init(li)
         .expect("Already initialized launch info");
 
-    let mut platform_cell = SvsmPlatformCell::new(li.platform_type);
+    let mut platform_cell = SvsmPlatformCell::new(li.platform_type, KernelEnvironment::env());
     let platform = platform_cell.as_mut_dyn_ref();
 
     init_cpuid_table(VirtAddr::from(launch_info.cpuid_page));
@@ -373,8 +377,11 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
         .configure_alternate_injection(launch_info.use_alternate_injection)
         .expect("Alternate injection required but not available");
 
-    SVSM_PLATFORM
+    KERNEL_SVSM_PLATFORM
         .init(&platform_cell)
+        .expect("Failed to initialize kernel SVSM platform object");
+    SVSM_PLATFORM
+        .init_from_ref(KERNEL_SVSM_PLATFORM.as_dyn_ref())
         .expect("Failed to initialize SVSM platform object");
 
     schedule_init();
@@ -384,7 +391,7 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 
 #[no_mangle]
 pub extern "C" fn svsm_main() {
-    let platform = SVSM_PLATFORM.as_dyn_ref();
+    let platform = SVSM_PLATFORM.get();
 
     // If required, the GDB stub can be started earlier, just after the console
     // is initialised in svsm_start() above.
@@ -394,7 +401,7 @@ pub extern "C" fn svsm_main() {
     //debug_break();
 
     SVSM_PLATFORM
-        .as_dyn_ref()
+        .get()
         .env_setup_svsm()
         .expect("SVSM platform environment setup failed");
 
@@ -407,7 +414,7 @@ pub extern "C" fn svsm_main() {
         }
         SvsmConfig::IgvmConfig(igvm_params)
     } else {
-        SvsmConfig::FirmwareConfig(FwCfg::new(SVSM_PLATFORM.as_dyn_ref().get_io_port()))
+        SvsmConfig::FirmwareConfig(FwCfg::new(SVSM_PLATFORM.get().get_io_port()))
     };
 
     init_memory_map(&config, &LAUNCH_INFO).expect("Failed to init guest memory map");

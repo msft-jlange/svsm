@@ -679,7 +679,7 @@ impl PerCpu {
 
     pub fn alloc_guest_vmsa(&self) -> Result<(), SvsmError> {
         // Enable alternate injection if the hypervisor supports it.
-        let use_alternate_injection = SVSM_PLATFORM.as_dyn_ref().query_apic_registration_state();
+        let use_alternate_injection = SVSM_PLATFORM.get().query_apic_registration_state();
         if use_alternate_injection {
             self.apic.replace(Some(LocalApic::new()));
 

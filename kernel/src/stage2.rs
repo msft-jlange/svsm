@@ -33,13 +33,18 @@ use svsm::mm::validate::{
     init_valid_bitmap_alloc, valid_bitmap_addr, valid_bitmap_set_valid_range,
 };
 use svsm::mm::{init_kernel_mapping_info, FixedAddressMappingRange};
+use svsm::platform::stage2::Stage2Environment;
 use svsm::platform::{PageStateChangeOp, SvsmPlatform, SvsmPlatformCell};
 use svsm::types::{PageSize, PAGE_SIZE, PAGE_SIZE_2M};
+use svsm::utils::immut_after_init::ImmutAfterInitCell;
 use svsm::utils::{halt, is_aligned, MemoryRegion};
 
 extern "C" {
     static mut pgtable: PageTable;
 }
+
+pub static STAGE2_SVSM_PLATFORM: ImmutAfterInitCell<SvsmPlatformCell<'static, Stage2Environment>> =
+    ImmutAfterInitCell::uninit();
 
 fn setup_stage2_allocator(heap_start: u64, heap_end: u64) {
     let vstart = VirtAddr::from(heap_start);
@@ -337,7 +342,7 @@ fn prepare_heap(
 #[no_mangle]
 pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) {
     let platform_type = SvsmPlatformType::from(launch_info.platform_type);
-    let mut platform_cell = SvsmPlatformCell::new(platform_type);
+    let mut platform_cell = SvsmPlatformCell::new(platform_type, Stage2Environment::env());
     let platform = platform_cell.as_mut_dyn_ref();
 
     let config = get_svsm_config(launch_info, platform).expect("Failed to get SVSM configuration");

@@ -23,7 +23,7 @@ use crate::utils::MemoryRegion;
 ///
 /// * `vaddr` - The virtual address of the page to be made shared.
 pub fn make_page_shared(vaddr: VirtAddr) -> Result<(), SvsmError> {
-    let platform = SVSM_PLATFORM.as_dyn_ref();
+    let platform = SVSM_PLATFORM.get();
 
     // Revoke page validation before changing page state.
     platform.invalidate_page_range(MemoryRegion::new(vaddr, PAGE_SIZE))?;
@@ -60,7 +60,7 @@ pub fn make_page_private(vaddr: VirtAddr) -> Result<(), SvsmError> {
     this_cpu().get_pgtable().set_encrypted_4k(vaddr)?;
     flush_tlb_global_sync();
 
-    let platform = SVSM_PLATFORM.as_dyn_ref();
+    let platform = SVSM_PLATFORM.get();
 
     // Ask the hypervisor to make the page private.
     let paddr = virt_to_phys(vaddr);

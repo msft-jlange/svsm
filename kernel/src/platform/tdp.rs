@@ -10,7 +10,7 @@ use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::percpu::PerCpu;
 use crate::error::SvsmError;
 use crate::io::IOPort;
-use crate::platform::{PageEncryptionMasks, PageStateChangeOp, SvsmPlatform};
+use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PlatformEnvironment, SvsmPlatform};
 use crate::serial::SerialPort;
 use crate::svsm_console::SVSMIOPort;
 use crate::types::PageSize;
@@ -28,14 +28,8 @@ static VTOM: ImmutAfterInitCell<usize> = ImmutAfterInitCell::uninit();
 pub struct TdpPlatform {}
 
 impl TdpPlatform {
-    pub fn new() -> Self {
+    pub fn new<T: PlatformEnvironment>(_env: &T) -> Self {
         Self {}
-    }
-}
-
-impl Default for TdpPlatform {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

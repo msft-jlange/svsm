@@ -236,14 +236,14 @@ unsafe impl<T: Copy + Send + Sync> Sync for ImmutAfterInitCell<T> {}
 /// ```
 ///
 #[derive(Debug)]
-pub struct ImmutAfterInitRef<'a, T: Copy> {
+pub struct ImmutAfterInitRef<'a, T: ?Sized> {
     #[doc(hidden)]
     ptr: ImmutAfterInitCell<*const T>,
     #[doc(hidden)]
     _phantom: PhantomData<&'a &'a T>,
 }
 
-impl<'a, T: Copy> ImmutAfterInitRef<'a, T> {
+impl<'a, T: ?Sized> ImmutAfterInitRef<'a, T> {
     /// Create an unitialized `ImmutAfterInitRef` instance. The reference itself
     /// must get initialized via either of [`Self::init_from_ref()`] or
     /// [`Self::init_from_cell()`] before first dereferencing it.
@@ -320,8 +320,8 @@ impl<T: Copy> Deref for ImmutAfterInitRef<'_, T> {
     }
 }
 
-unsafe impl<T: Copy + Send> Send for ImmutAfterInitRef<'_, T> {}
-unsafe impl<T: Copy + Send + Sync> Sync for ImmutAfterInitRef<'_, T> {}
+unsafe impl<T: ?Sized + Send> Send for ImmutAfterInitRef<'_, T> {}
+unsafe impl<T: ?Sized + Send + Sync> Sync for ImmutAfterInitRef<'_, T> {}
 
 pub fn immut_after_init_set_multithreaded() {
     #[cfg(debug_assertions)]

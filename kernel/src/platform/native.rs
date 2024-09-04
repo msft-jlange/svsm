@@ -11,7 +11,7 @@ use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::PerCpu;
 use crate::error::SvsmError;
 use crate::io::IOPort;
-use crate::platform::{PageEncryptionMasks, PageStateChangeOp, SvsmPlatform};
+use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PlatformEnvironment, SvsmPlatform};
 use crate::serial::SerialPort;
 use crate::svsm_console::NativeIOPort;
 use crate::types::PageSize;
@@ -27,14 +27,8 @@ const APIC_MSR_ICR: u32 = 0x830;
 pub struct NativePlatform {}
 
 impl NativePlatform {
-    pub fn new() -> Self {
+    pub fn new<T: PlatformEnvironment>(_env: &T) -> Self {
         Self {}
-    }
-}
-
-impl Default for NativePlatform {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

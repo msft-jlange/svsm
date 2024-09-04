@@ -26,7 +26,7 @@ fn apic_query_features(params: &mut RequestParams) -> Result<(), SvsmReqError> {
 }
 
 fn apic_configure(params: &RequestParams) -> Result<(), SvsmReqError> {
-    let platform = SVSM_PLATFORM.as_dyn_ref();
+    let platform = SVSM_PLATFORM.get();
     let enabled = match params.rcx {
         0b00 => {
             // Query the current registration state of APIC emulation to
