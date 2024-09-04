@@ -43,10 +43,19 @@ pub enum PageStateChangeOp {
     Unsmash,
 }
 
+/// This defines an abstraction to describe a mechanism for describing a virtual
+/// mapping of a physical address, which may be implemented differently in
+/// stage2 and the kernel.
+pub trait MappingGuard {
+    fn virt_addr(&self) -> VirtAddr;
+}
+
 /// This defines an abstraction to encapsulate services required by the
 /// platform object, where the services may be implemented differently in
 /// stage2 and the kernel.
-pub trait PlatformEnvironment: Send + Sync {}
+pub trait PlatformEnvironment: Send + Sync {
+    fn map_phys_range(&self, paddr: PhysAddr, len: usize) -> Result<impl MappingGuard, SvsmError>;
+}
 
 /// This defines a platform abstraction to permit the SVSM to run on different
 /// underlying architectures.
@@ -90,10 +99,10 @@ pub trait SvsmPlatform: Send + Sync {
     ) -> Result<(), SvsmError>;
 
     /// Marks a range of pages as valid for use as private pages.
-    fn validate_page_range(&self, region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError>;
+    fn validate_page_range(&self, region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError>;
 
     /// Marks a range of pages as invalid for use as private pages.
-    fn invalidate_page_range(&self, region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError>;
+    fn invalidate_page_range(&self, region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError>;
 
     /// Configures the use of alternate injection as requested.
     fn configure_alternate_injection(&mut self, alt_inj_requested: bool) -> Result<(), SvsmError>;

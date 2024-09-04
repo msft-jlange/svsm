@@ -4,7 +4,7 @@
 //
 // Author: Jon Lange <jlange@microsoft.com>
 
-use crate::address::{PhysAddr, VirtAddr};
+use crate::address::PhysAddr;
 use crate::console::init_console;
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::msr::write_msr;
@@ -90,12 +90,12 @@ impl SvsmPlatform for NativePlatform {
     }
 
     /// Marks a range of pages as valid for use as private pages.
-    fn validate_page_range(&self, _region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
+    fn validate_page_range(&self, _region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
         Ok(())
     }
 
     /// Marks a range of pages as invalid for use as private pages.
-    fn invalidate_page_range(&self, _region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
+    fn invalidate_page_range(&self, _region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
         Ok(())
     }
 

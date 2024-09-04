@@ -4,14 +4,15 @@
 //
 // Author: Jon Lange <jlange@microsoft.com>
 
-use crate::address::{PhysAddr, VirtAddr};
+use crate::address::{Address, PhysAddr};
 use crate::console::init_console;
 use crate::cpu::cpuid::{cpuid_table, CpuidResult};
 use crate::cpu::percpu::{current_ghcb, this_cpu, PerCpu};
 use crate::error::ApicError::Registration;
 use crate::error::SvsmError;
 use crate::io::IOPort;
-use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PlatformEnvironment, SvsmPlatform};
+use crate::mm::{PAGE_SIZE, PAGE_SIZE_2M};
+use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PlatformEnvironment, SvsmPlatform, MappingGuard};
 use crate::serial::SerialPort;
 use crate::sev::hv_doorbell::current_hv_doorbell;
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, verify_ghcb_version, GHCBHvFeatures};
@@ -35,13 +36,40 @@ static APIC_EMULATION_REG_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, Debug)]
 pub struct SnpPlatform<'a, T: PlatformEnvironment> {
-    _env: &'a T,
+    env: &'a T,
 }
 
 impl<'a, T: PlatformEnvironment> SnpPlatform<'a, T> {
     pub fn new(env: &'a T) -> Self {
-        Self { _env: env }
+        Self { env }
     }
+}
+
+fn pvalidate_page_range<T: PlatformEnvironment>(
+    env: &T,
+    range: MemoryRegion<PhysAddr>,
+    op: PvalidateOp,
+) -> Result<(), SvsmError> {
+    // In the future, it is likely that this function will need to be prepared
+    // to execute both PVALIDATE and RMPADJSUT over the same set of addresses,
+    // so the loop is structured to anticipate that possibility.
+    let mut paddr = range.start();
+    let paddr_end = range.end();
+    while paddr < paddr_end {
+        // Check whether a 2 MB page can be attempted.
+        let (mapping, len) = if paddr.is_aligned(PAGE_SIZE_2M) && paddr + PAGE_SIZE_2M <= paddr_end
+        {
+            let mapping = env.map_phys_range(paddr, PAGE_SIZE_2M)?;
+            (mapping, PAGE_SIZE_2M)
+        } else {
+            let mapping = env.map_phys_range(paddr, PAGE_SIZE)?;
+            (mapping, PAGE_SIZE)
+        };
+        pvalidate_range(MemoryRegion::new(mapping.virt_addr(), len), op)?;
+        paddr = paddr + len;
+    }
+
+    Ok(())
 }
 
 impl<T: PlatformEnvironment> SvsmPlatform for SnpPlatform<'_, T> {
@@ -135,13 +163,13 @@ impl<T: PlatformEnvironment> SvsmPlatform for SnpPlatform<'_, T> {
     }
 
     /// Marks a range of pages as valid for use as private pages.
-    fn validate_page_range(&self, region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
-        pvalidate_range(region, PvalidateOp::Valid)
+    fn validate_page_range(&self, region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
+        pvalidate_page_range(self.env, region, PvalidateOp::Valid)
     }
 
     /// Marks a range of pages as invalid for use as private pages.
-    fn invalidate_page_range(&self, region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
-        pvalidate_range(region, PvalidateOp::Invalid)
+    fn invalidate_page_range(&self, region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
+        pvalidate_page_range(self.env, region, PvalidateOp::Invalid)
     }
 
     fn configure_alternate_injection(&mut self, alt_inj_requested: bool) -> Result<(), SvsmError> {

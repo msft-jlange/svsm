@@ -26,8 +26,8 @@ pub fn make_page_shared(vaddr: VirtAddr) -> Result<(), SvsmError> {
     let platform = SVSM_PLATFORM.get();
 
     // Revoke page validation before changing page state.
-    platform.invalidate_page_range(MemoryRegion::new(vaddr, PAGE_SIZE))?;
     let paddr = virt_to_phys(vaddr);
+    platform.invalidate_page_range(MemoryRegion::new(paddr, PAGE_SIZE))?;
     if valid_bitmap_valid_addr(paddr) {
         valid_bitmap_clear_valid_4k(paddr);
     }
@@ -71,7 +71,7 @@ pub fn make_page_private(vaddr: VirtAddr) -> Result<(), SvsmError> {
     )?;
 
     // Revoke page validation before changing page state.
-    platform.validate_page_range(MemoryRegion::new(vaddr, PAGE_SIZE))?;
+    platform.validate_page_range(MemoryRegion::new(paddr, PAGE_SIZE))?;
     if valid_bitmap_valid_addr(paddr) {
         valid_bitmap_set_valid_4k(paddr);
     }

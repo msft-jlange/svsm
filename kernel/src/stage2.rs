@@ -88,23 +88,26 @@ fn setup_env(
         .env_setup(debug_serial_port, launch_info.vtom.try_into().unwrap())
         .expect("Early environment setup failed");
 
-    // Validate the first 640 KB of memory so it can be used if necessary.
-    let region = MemoryRegion::<VirtAddr>::new(VirtAddr::from(0u64), 640 * 1024);
-    platform
-        .validate_page_range(region)
-        .expect("failed to validate low 640 KB");
-
-    // Supply the heap bounds as the kernel range, since the only virtual-to
-    // physical translations required will be on heap memory.
     let kernel_mapping = FixedAddressMappingRange::new(
         VirtAddr::from(0x808000u64),
         VirtAddr::from(launch_info.stage2_end as u64),
         PhysAddr::from(0x808000u64),
     );
 
-    let heap_mapping =
-        FixedAddressMappingRange::new(region.start(), region.end(), PhysAddr::from(0u64));
+    // Use the low 640 KB of memory as the heap.
+    let lowmem_region = MemoryRegion::new(PhysAddr::from(0u64), 640 * 1024);
+    let heap_mapping = FixedAddressMappingRange::new(
+        VirtAddr::from(0u64),
+        VirtAddr::from(u64::from(lowmem_region.end())),
+        lowmem_region.start(),
+    );
     init_kernel_mapping_info(kernel_mapping, Some(heap_mapping));
+
+    // Now that the heap virtual-to-physical mapping has been established,
+    // validate the first 640 KB of memory so it can be used if necessary.
+    platform
+        .validate_page_range(lowmem_region)
+        .expect("failed to validate low 640 KB");
 
     let cpuid_page = unsafe { &*(launch_info.cpuid_page as *const SnpCpuidTable) };
 
@@ -145,14 +148,11 @@ fn map_and_validate(
     let mut pgtbl = this_cpu().get_pgtable();
     pgtbl.map_region(vregion, paddr, flags)?;
 
+    let pregion = MemoryRegion::new(paddr, vregion.len());
     if config.page_state_change_required() {
-        platform.page_state_change(
-            MemoryRegion::new(paddr, vregion.len()),
-            PageSize::Huge,
-            PageStateChangeOp::Private,
-        )?;
+        platform.page_state_change(pregion, PageSize::Huge, PageStateChangeOp::Private)?;
     }
-    platform.validate_page_range(vregion)?;
+    platform.validate_page_range(pregion)?;
     valid_bitmap_set_valid_range(paddr, paddr + vregion.len());
     Ok(())
 }

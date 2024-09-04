@@ -4,7 +4,7 @@
 //
 // Author: Peter Fang <peter.fang@intel.com>
 
-use crate::address::{PhysAddr, VirtAddr};
+use crate::address::PhysAddr;
 use crate::console::init_console;
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::percpu::PerCpu;
@@ -89,12 +89,12 @@ impl SvsmPlatform for TdpPlatform {
         Err(SvsmError::Tdx)
     }
 
-    fn validate_page_range(&self, _region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
-        Err(SvsmError::Tdx)
+    fn validate_page_range(&self, _region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
+        todo!();
     }
 
-    fn invalidate_page_range(&self, _region: MemoryRegion<VirtAddr>) -> Result<(), SvsmError> {
-        Err(SvsmError::Tdx)
+    fn invalidate_page_range(&self, _region: MemoryRegion<PhysAddr>) -> Result<(), SvsmError> {
+        todo!();
     }
 
     fn configure_alternate_injection(&mut self, _alt_inj_requested: bool) -> Result<(), SvsmError> {
