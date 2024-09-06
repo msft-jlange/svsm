@@ -33,6 +33,33 @@ static VTOM: ImmutAfterInitCell<usize> = ImmutAfterInitCell::uninit();
 
 static APIC_EMULATION_REG_COUNT: AtomicU32 = AtomicU32::new(0);
 
+fn pvalidate_physical_range(
+    env: &T,
+    range: MemoryRegion<PhysAddr>,
+    op: PvalidateOp,
+) -> Result<(), SvsmError> {
+    // In the future, it is likely that this function will need to be prepared
+    // to execute both PVALIDATE and RMPADJUST over the same set of addresses,
+    // so the loop is structured to anticipate that possibility.
+    let mut paddr = range.start();
+    let paddr_end = range.end();
+    while paddr < paddr_end {
+        // Check whether a 2 MB page can be attempted.
+        let (mapping, len) = if paddr.is_aligned(PAGE_SIZE_2M) && paddr + PAGE_SIZE_2M <= paddr_end
+        {
+            let mapping = PerCPUMappingGuard::create(paddr, paddr + PAGE_SIZE_2M, 0)?;
+            (mapping, PAGE_SIZE_2M)
+        } else {
+            let mapping = PerCPUMappingGuard::create(paddr, paddr + PAGE_SIZE, 0)?;
+            (mapping, PAGE_SIZE)
+        };
+        pvalidate_range(MemoryRegion::new(mapping.virt_addr(), len), op)?;
+        paddr = paddr + len;
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct SnpPlatform {}
 
