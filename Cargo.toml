@@ -31,6 +31,7 @@ members = [
 # internal library crates
 bootlib = { path = "bootlib" }
 cpuarch = { path = "cpuarch" }
+hyperv = { path = "hyperv" }
 test = { path = "test" }
 svsm = { path = "kernel" }
 elf = { path = "elf" }
