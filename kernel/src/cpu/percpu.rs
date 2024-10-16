@@ -8,13 +8,14 @@ extern crate alloc;
 
 use super::gdt_mut;
 use super::tss::{X86Tss, IST_DF};
-use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::address::{Address, PhysAddr, VirtAddr, VirtPhysPair};
 use crate::cpu::idt::common::INT_INJ_VECTOR;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa};
 use crate::cpu::{IrqState, LocalApic};
 use crate::error::{ApicError, SvsmError};
 use crate::locking::{LockGuard, RWLock, RWLockIrqSafe, SpinLock};
+use crate::mm::alloc::allocate_pages;
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::virtualrange::VirtualRange;
 use crate::mm::vm::{Mapping, VMKernelStack, VMPhysMem, VMRMapping, VMReserved, VMR};
@@ -308,6 +309,9 @@ pub struct PerCpu {
     /// GHCB page for this CPU.
     ghcb: OnceCell<GhcbPage>,
 
+    /// Hypercall input/output pages for this CPU if running under Hyper-V.
+    hypercall_pages: OnceCell<(VirtPhysPair, VirtPhysPair)>,
+
     /// `#HV` doorbell page for this CPU.
     hv_doorbell: Cell<Option<&'static HVDoorbell>>,
 
@@ -341,6 +345,7 @@ impl PerCpu {
 
             shared: PerCpuShared::new(apic_id),
             ghcb: OnceCell::new(),
+            hypercall_pages: OnceCell::new(),
             hv_doorbell: Cell::new(None),
             init_stack: Cell::new(None),
             ist: IstStacks::new(),
@@ -405,6 +410,23 @@ impl PerCpu {
 
     fn ghcb(&self) -> Option<&GhcbPage> {
         self.ghcb.get()
+    }
+
+    /// Allocates hypercall input/output pages for this CPU.
+    pub fn allocate_hypercall_pages(&self) -> Result<(), SvsmError> {
+        let vaddr = allocate_pages(2)?;
+        let pages = (
+            VirtPhysPair::new(vaddr),
+            VirtPhysPair::new(vaddr + PAGE_SIZE),
+        );
+        self.hypercall_pages
+            .set(pages)
+            .expect("Per-cpu hypercall pages allocated more than once");
+        Ok(())
+    }
+
+    pub fn get_hypercall_pages(&self) -> (VirtPhysPair, VirtPhysPair) {
+        *self.hypercall_pages.get().unwrap()
     }
 
     pub fn hv_doorbell(&self) -> Option<&'static HVDoorbell> {

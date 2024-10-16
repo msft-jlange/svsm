@@ -6,9 +6,9 @@
 
 use crate::address::VirtAddr;
 use crate::cpu::cpuid::CpuidResult;
-use crate::hyperv::HyperVMsr;
 use crate::cpu::msr::write_msr;
 use crate::error::SvsmError;
+use crate::hyperv::HyperVMsr;
 use crate::mm::alloc::allocate_pages;
 use crate::mm::virt_to_phys;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
