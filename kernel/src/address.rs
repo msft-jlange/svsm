@@ -4,10 +4,11 @@
 //
 // Author: Carlos López <carlos.lopez@suse.com>
 
+use crate::mm::virt_to_phys;
 use crate::types::{PAGE_SHIFT, PAGE_SIZE};
+
 use core::fmt;
 use core::ops;
-
 use core::slice;
 
 // The backing type to represent an address;
@@ -375,5 +376,20 @@ impl Address for VirtAddr {
         self.bits()
             .checked_sub(off)
             .map(|addr| sign_extend(addr).into())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct VirtPhysPair {
+    pub vaddr: VirtAddr,
+    pub paddr: PhysAddr,
+}
+
+impl VirtPhysPair {
+    pub fn new(vaddr: VirtAddr) -> Self {
+        Self {
+            vaddr,
+            paddr: virt_to_phys(vaddr),
+        }
     }
 }
