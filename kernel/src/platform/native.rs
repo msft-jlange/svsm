@@ -10,7 +10,7 @@ use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::PerCpu;
 use crate::error::SvsmError;
-use crate::hyperv::{hyperv_setup_hypercalls, is_hyperv_hypervisor};
+use crate::hyperv::{hyperv_setup_hypercalls, is_hyperv_hypervisor, start_vp_hypercall};
 use crate::io::{IOPort, DEFAULT_IO_DRIVER};
 use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, SvsmPlatform};
 use crate::types::PageSize;
@@ -150,7 +150,11 @@ impl SvsmPlatform for NativePlatform {
         todo!();
     }
 
-    fn start_cpu(&self, _cpu: &PerCpu, _start_rip: u64) -> Result<(), SvsmError> {
+    fn start_cpu(&self, cpu: &PerCpu, start_rip: u64) -> Result<(), SvsmError> {
+        if self.is_hyperv {
+            return start_vp_hypercall(cpu, start_rip);
+        }
+
         todo!();
     }
 }
