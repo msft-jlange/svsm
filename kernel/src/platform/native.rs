@@ -10,6 +10,7 @@ use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::PerCpu;
 use crate::error::SvsmError;
+use crate::hyperv;
 use crate::hyperv::{hyperv_setup_hypercalls, is_hyperv_hypervisor};
 use crate::io::{IOPort, DEFAULT_IO_DRIVER};
 use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, SvsmPlatform};
@@ -150,7 +151,11 @@ impl SvsmPlatform for NativePlatform {
         todo!();
     }
 
-    fn start_cpu(&self, _cpu: &PerCpu, _start_rip: u64) -> Result<(), SvsmError> {
+    fn start_cpu(
+        &self,
+        _cpu: &PerCpu,
+        _context: &hyperv::HvInitialVpContext,
+    ) -> Result<(), SvsmError> {
         todo!();
     }
 }
