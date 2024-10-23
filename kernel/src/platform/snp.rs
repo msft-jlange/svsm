@@ -109,8 +109,15 @@ impl SvsmPlatform for SnpPlatform {
         cpu.setup_ghcb()
     }
 
-    fn setup_percpu_current(&self, cpu: &PerCpu) -> Result<(), SvsmError> {
+    fn setup_percpu_current(&self, cpu: &PerCpu, is_bsp: bool) -> Result<(), SvsmError> {
         cpu.register_ghcb()?;
+
+        // On the BSP, the #HV doorbell page must be configured later, when
+        // the SVSM environment is finally configured.
+        if !is_bsp {
+            cpu.configure_hv_doorbell()?;
+        }
+
         Ok(())
     }
 

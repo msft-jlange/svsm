@@ -68,7 +68,7 @@ impl SvsmPlatform for NativePlatform {
         Ok(())
     }
 
-    fn setup_percpu_current(&self, _cpu: &PerCpu) -> Result<(), SvsmError> {
+    fn setup_percpu_current(&self, _cpu: &PerCpu, _is_bsp: bool) -> Result<(), SvsmError> {
         Ok(())
     }
 

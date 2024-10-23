@@ -66,7 +66,7 @@ pub trait SvsmPlatform {
     fn setup_percpu(&self, cpu: &PerCpu) -> Result<(), SvsmError>;
 
     /// Completes initialization of a per-CPU object on the target CPU.
-    fn setup_percpu_current(&self, cpu: &PerCpu) -> Result<(), SvsmError>;
+    fn setup_percpu_current(&self, cpu: &PerCpu, is_bsp: bool) -> Result<(), SvsmError>;
 
     /// Determines the paging encryption masks for the current architecture.
     fn get_page_encryption_masks(&self) -> PageEncryptionMasks;

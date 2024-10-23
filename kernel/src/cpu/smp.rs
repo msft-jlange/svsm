@@ -41,13 +41,8 @@ pub fn start_secondary_cpus(platform: &dyn SvsmPlatform, cpus: &[ACPICPUInfo]) {
 #[no_mangle]
 fn start_ap() {
     this_cpu()
-        .setup_on_cpu(SVSM_PLATFORM.as_dyn_ref())
+        .setup_on_cpu(SVSM_PLATFORM.as_dyn_ref(), false)
         .expect("setup_on_cpu() failed");
-
-    // Configure the #HV doorbell page as required.
-    this_cpu()
-        .configure_hv_doorbell()
-        .expect("configure_hv_doorbell() failed");
 
     this_cpu()
         .setup_idle_task(ap_request_loop)

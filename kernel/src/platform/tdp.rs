@@ -58,7 +58,7 @@ impl SvsmPlatform for TdpPlatform {
         Err(SvsmError::Tdx)
     }
 
-    fn setup_percpu_current(&self, _cpu: &PerCpu) -> Result<(), SvsmError> {
+    fn setup_percpu_current(&self, _cpu: &PerCpu, _is_bsp: bool) -> Result<(), SvsmError> {
         Err(SvsmError::Tdx)
     }
 
