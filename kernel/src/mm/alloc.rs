@@ -16,7 +16,7 @@ use core::mem::size_of;
 use core::ptr;
 
 #[cfg(any(test, fuzzing))]
-use crate::locking::LockGuard;
+use crate::locking::SpinLockGuard;
 
 /// Represents possible errors that can occur during memory allocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1677,7 +1677,7 @@ pub const DEFAULT_TEST_MEMORY_SIZE: usize = 16usize * 1024 * 1024;
 #[cfg(any(test, fuzzing))]
 #[derive(Debug)]
 #[expect(dead_code)]
-pub struct TestRootMem<'a>(LockGuard<'a, ()>);
+pub struct TestRootMem<'a>(SpinLockGuard<'a, ()>);
 
 #[cfg(any(test, fuzzing))]
 impl TestRootMem<'_> {

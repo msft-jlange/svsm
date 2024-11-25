@@ -17,7 +17,7 @@ use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa};
 use crate::cpu::{IrqState, LocalApic};
 use crate::error::{ApicError, SvsmError};
-use crate::locking::{LockGuard, RWLock, RWLockIrqSafe, SpinLock};
+use crate::locking::{RWLock, RWLockIrqSafe, SpinLock, SpinLockGuard};
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::virtualrange::VirtualRange;
 use crate::mm::vm::{
@@ -808,7 +808,7 @@ impl PerCpu {
         Ok(())
     }
 
-    pub fn guest_vmsa_ref(&self) -> LockGuard<'_, GuestVmsaRef> {
+    pub fn guest_vmsa_ref(&self) -> SpinLockGuard<'_, GuestVmsaRef> {
         self.shared().guest_vmsa.lock()
     }
 

@@ -11,8 +11,8 @@
 pub mod tcgtpm;
 
 use crate::vtpm::tcgtpm::TcgTpm as Vtpm;
-use crate::{locking::LockGuard, protocols::vtpm::TpmPlatformCommand};
 use crate::{locking::SpinLock, protocols::errors::SvsmReqError};
+use crate::{locking::SpinLockGuard, protocols::vtpm::TpmPlatformCommand};
 
 /// Basic services required to perform the VTPM Protocol
 pub trait VtpmProtocolInterface {
@@ -81,6 +81,6 @@ pub fn vtpm_init() -> Result<(), SvsmReqError> {
     Ok(())
 }
 
-pub fn vtpm_get_locked<'a>() -> LockGuard<'a, Vtpm> {
+pub fn vtpm_get_locked<'a>() -> SpinLockGuard<'a, Vtpm> {
     VTPM.lock()
 }

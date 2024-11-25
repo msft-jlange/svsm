@@ -40,8 +40,10 @@ impl<T, I> Deref for RawReadLockGuard<'_, T, I> {
     }
 }
 
-pub type ReadLockGuard<'a, T> = RawReadLockGuard<'a, T, IrqUnsafeLocking>;
-pub type ReadLockGuardIrqSafe<'a, T> = RawReadLockGuard<'a, T, IrqSafeLocking>;
+pub type ReadLockGuard<'a, T> = RawReadLockGuard<'a, T, UnguardedLocking>;
+pub type ReadLockGuardIrqSafe<'a, T> = RawReadLockGuard<'a, T, IrqGuardLocking>;
+pub type ReadLockGuardTprSafe<'a, T, const TPR: usize> =
+    RawReadLockGuard<'a, T, TprGuardLocking<TPR>>;
 
 /// A guard that provides exclusive write access to the data protected by [`RWLock`]
 #[derive(Debug)]
@@ -80,8 +82,10 @@ impl<T, I> DerefMut for RawWriteLockGuard<'_, T, I> {
     }
 }
 
-pub type WriteLockGuard<'a, T> = RawWriteLockGuard<'a, T, IrqUnsafeLocking>;
-pub type WriteLockGuardIrqSafe<'a, T> = RawWriteLockGuard<'a, T, IrqSafeLocking>;
+pub type WriteLockGuard<'a, T> = RawWriteLockGuard<'a, T, UnguardedLocking>;
+pub type WriteLockGuardIrqSafe<'a, T> = RawWriteLockGuard<'a, T, IrqGuardLocking>;
+pub type WriteLockGuardTprSafe<'a, T, const TPR: usize> =
+    RawWriteLockGuard<'a, T, TprGuardLocking<TPR>>;
 
 /// A simple Read-Write Lock (RWLock) that allows multiple readers or
 /// one exclusive writer.
@@ -216,7 +220,7 @@ impl<T, I: IrqLocking> RawRWLock<T, I> {
     ///
     /// A [`ReadLockGuard`] that provides read access to the protected data.
     pub fn lock_read(&self) -> RawReadLockGuard<'_, T, I> {
-        let irq_state = I::irqs_disable();
+        let irq_state = I::acquire_lock();
         loop {
             let val = self.wait_for_writers();
             let (readers, _) = split_val(val);
@@ -246,7 +250,7 @@ impl<T, I: IrqLocking> RawRWLock<T, I> {
     ///
     /// A [`WriteLockGuard`] that provides write access to the protected data.
     pub fn lock_write(&self) -> RawWriteLockGuard<'_, T, I> {
-        let irq_state = I::irqs_disable();
+        let irq_state = I::acquire_lock();
 
         // Waiting for current writer to finish
         loop {
@@ -276,8 +280,9 @@ impl<T, I: IrqLocking> RawRWLock<T, I> {
     }
 }
 
-pub type RWLock<T> = RawRWLock<T, IrqUnsafeLocking>;
-pub type RWLockIrqSafe<T> = RawRWLock<T, IrqSafeLocking>;
+pub type RWLock<T> = RawRWLock<T, UnguardedLocking>;
+pub type RWLockIrqSafe<T> = RawRWLock<T, IrqGuardLocking>;
+pub type RWLockTprSafe<T, const TPR: usize> = RawRWLock<T, TprGuardLocking<TPR>>;
 
 mod tests {
     #[test]

@@ -17,7 +17,7 @@ pub mod svsm_gdbstub {
     use crate::cpu::percpu::this_cpu;
     use crate::cpu::X86GeneralRegs;
     use crate::error::SvsmError;
-    use crate::locking::{LockGuard, SpinLock};
+    use crate::locking::{SpinLock, SpinLockGuard};
     use crate::mm::guestmem::{read_u8, write_u8};
     use crate::mm::PerCPUPageMappingGuard;
     use crate::platform::SvsmPlatform;
@@ -228,7 +228,7 @@ pub mod svsm_gdbstub {
     fn handle_stop(
         ctx: &mut TaskContext,
         exception_type: ExceptionType,
-        gdb_state: &mut LockGuard<'_, Option<SvsmGdbStub<'_>>>,
+        gdb_state: &mut SpinLockGuard<'_, Option<SvsmGdbStub<'_>>>,
     ) {
         let SvsmGdbStub { gdb, mut target } = gdb_state.take().expect("Invalid GDB state");
 

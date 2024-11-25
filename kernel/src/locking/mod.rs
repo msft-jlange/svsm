@@ -8,9 +8,12 @@ pub mod common;
 pub mod rwlock;
 pub mod spinlock;
 
-pub use common::{IrqLocking, IrqSafeLocking, IrqUnsafeLocking};
+pub use common::{IrqGuardLocking, IrqLocking, TprGuardLocking, UnguardedLocking};
 pub use rwlock::{
-    RWLock, RWLockIrqSafe, ReadLockGuard, ReadLockGuardIrqSafe, WriteLockGuard,
-    WriteLockGuardIrqSafe,
+    RWLock, RWLockIrqSafe, RWLockTprSafe, ReadLockGuard, ReadLockGuardIrqSafe,
+    ReadLockGuardTprSafe, WriteLockGuard, WriteLockGuardIrqSafe, WriteLockGuardTprSafe,
 };
-pub use spinlock::{LockGuard, LockGuardIrqSafe, RawLockGuard, SpinLock, SpinLockIrqSafe};
+pub use spinlock::{
+    RawLockGuard, SpinLock, SpinLockGuard, SpinLockGuardIrqSafe, SpinLockGuardTprSafe,
+    SpinLockIrqSafe, SpinLockTprSafe,
+};
