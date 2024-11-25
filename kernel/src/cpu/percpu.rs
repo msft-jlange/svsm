@@ -6,7 +6,9 @@
 
 extern crate alloc;
 
+use super::cpuset::AtomicCpuSet;
 use super::gdt_mut;
+use super::ipi::{handle_ipi_interrupt, send_ipi, IpiBoard, IpiMessage, IpiRequest, IpiTarget};
 use super::isst::Isst;
 use super::msr::write_msr;
 use super::shadow_stack::{is_cet_ss_supported, ISST_ADDR};
@@ -223,6 +225,13 @@ pub struct PerCpuShared {
     ipi_irr: [AtomicU32; 8],
     ipi_pending: AtomicBool,
     nmi_pending: AtomicBool,
+
+    // A set of CPUs that have requested IPI handling by this CPU.
+    ipi_requests: AtomicCpuSet,
+
+    // A bulletin board holding an IPI message being offered by this CPU to
+    // other CPUs.
+    ipi_board: Cell<*const IpiBoard>,
 }
 
 impl PerCpuShared {
@@ -235,6 +244,8 @@ impl PerCpuShared {
             ipi_irr: core::array::from_fn(|_| AtomicU32::new(0)),
             ipi_pending: AtomicBool::new(false),
             nmi_pending: AtomicBool::new(false),
+            ipi_requests: AtomicCpuSet::default(),
+            ipi_board: Cell::new(ptr::null()),
         }
     }
 
@@ -305,6 +316,14 @@ impl PerCpuShared {
 
     pub fn nmi_pending(&self) -> bool {
         self.nmi_pending.swap(false, Ordering::Relaxed)
+    }
+
+    pub fn ipi_from(&self, cpu_index: usize) {
+        self.ipi_requests.add(cpu_index, Ordering::Release);
+    }
+
+    pub fn ipi_board(&self) -> *const IpiBoard {
+        self.ipi_board.get()
     }
 }
 
@@ -480,6 +499,38 @@ impl PerCpu {
     #[inline(always)]
     pub fn lower_tpr(&self, tpr_value: usize) {
         self.irq_state.lower_tpr(tpr_value);
+    }
+
+    /// Sends an IPI message to multiple CPUs.
+    ///
+    /// * `target_set` - The set of CPUs to which to send the IPI.
+    /// * `ipi_message` - The message to send.
+    pub fn send_multicast_ipi(&self, target_set: IpiTarget, ipi_message: &IpiMessage) {
+        send_ipi(
+            target_set,
+            self.shared.cpu_index,
+            IpiRequest::IpiShared(ipi_message),
+            &self.shared.ipi_board,
+        );
+    }
+
+    /// Sends an IPI message to a single CPU.  Because only a single CPU can
+    /// receive the message, the message object can be mutable.
+    ///
+    /// * `cpu_index` - The index of the CPU to receive the message.
+    /// * `ipi_message` - The message to send.
+    pub fn send_unicast_ipi(&self, cpu_index: usize, ipi_message: &mut IpiMessage) {
+        send_ipi(
+            IpiTarget::Single(cpu_index),
+            self.shared.cpu_index,
+            IpiRequest::IpiMut(ipi_message),
+            &self.shared.ipi_board,
+        );
+    }
+
+    /// Handles an IPI interrupt.
+    pub fn handle_ipi_interrupt(&self) {
+        handle_ipi_interrupt(&self.shared.ipi_requests);
     }
 
     /// Sets up the CPU-local GHCB page.
