@@ -93,3 +93,6 @@ impl TryFrom<usize> for Bytes {
         }
     }
 }
+
+pub const TPR_SYNCH: usize = 13;
+pub const TPR_IPI: usize = 14;
