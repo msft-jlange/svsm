@@ -7,6 +7,8 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+use core::arch::asm;
+
 use bootlib::kernel_launch::KernelLaunchInfo;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
@@ -35,6 +37,7 @@ use svsm::fw_meta::{print_fw_meta, validate_fw_memory, SevFWMetaData};
 use svsm::igvm_params::IgvmParams;
 use svsm::kernel_region::new_kernel_region;
 use svsm::mm::alloc::{memory_info, print_memory_info, root_mem_init};
+use svsm::mm::globalmem::init_global_mem;
 use svsm::mm::memory::{init_memory_map, write_guest_memory_map};
 use svsm::mm::pagetable::paging_init;
 use svsm::mm::virtualrange::virt_log_usage;
@@ -352,6 +355,8 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
         .expect("Failed to run percpu.setup_on_cpu()");
     bsp_percpu.load();
 
+    init_global_mem(&launch_info);
+
     if is_cet_ss_supported() {
         enable_shadow_stacks!(bsp_percpu);
     }
@@ -485,6 +490,7 @@ fn panic(info: &PanicInfo<'_>) -> ! {
 
     log::error!("Panic: CPU[{}] {}", this_cpu().get_apic_id(), info);
 
+    unsafe { asm!("int 30h") }
     print_stack(3);
 
     loop {

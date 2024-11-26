@@ -133,8 +133,22 @@ pub const STACK_SIZE: usize = PAGE_SIZE * STACK_PAGES;
 pub const STACK_GUARD_SIZE: usize = STACK_SIZE;
 pub const STACK_TOTAL_SIZE: usize = STACK_SIZE + STACK_GUARD_SIZE;
 
+pub const fn virt_from_pt_parts(
+    pml4_idx: usize,
+    pdp_idx: usize,
+    pd_idx: usize,
+    pt_idx: usize,
+) -> VirtAddr {
+    VirtAddr::new(
+        (pml4_idx << ((3 * 9) + 12))
+            | (pdp_idx << ((2 * 9) + 12))
+            | (pd_idx << ((1 * 9) + 12))
+            | (pt_idx << ((0 * 9) + 12)),
+    )
+}
+
 const fn virt_from_idx(idx: usize) -> VirtAddr {
-    VirtAddr::new(idx << ((3 * 9) + 12))
+    virt_from_pt_parts(idx, 0, 0, 0)
 }
 
 /// Level3 page-table index shared between all CPUs
@@ -237,7 +251,7 @@ pub const SVSM_PERTASK_XSAVE_AREA_BASE: VirtAddr =
 /// Page table self-map level 3 index
 pub const PGTABLE_LVL3_IDX_PTE_SELFMAP: usize = 493;
 
-pub const SVSM_PTE_BASE: VirtAddr = virt_from_idx(PGTABLE_LVL3_IDX_PTE_SELFMAP);
+pub const SVSM_PTE_BASE: VirtAddr = virt_from_pt_parts(PGTABLE_LVL3_IDX_PTE_SELFMAP, 0, 0, 0);
 
 //
 // User-space mapping constants

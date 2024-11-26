@@ -154,7 +154,9 @@ impl VMR {
     fn initialize_common(&self, lazy: bool) -> Result<(), SvsmError> {
         let start = VirtAddr::from(self.start_pfn << PAGE_SHIFT);
         let end = VirtAddr::from(self.end_pfn << PAGE_SHIFT);
-        assert!(start < end && start.is_aligned(VMR_GRANULE) && end.is_aligned(VMR_GRANULE));
+        assert!(start < end);
+        assert!(start.is_aligned(VMR_GRANULE));
+        assert!(end.is_aligned(VMR_GRANULE));
 
         self.alloc_page_tables(lazy)
     }
@@ -175,6 +177,30 @@ impl VMR {
     /// `Ok(())` on success, Err(SvsmError::Mem) on allocation error
     pub fn initialize_lazy(&self) -> Result<(), SvsmError> {
         self.initialize_common(true)
+    }
+
+    /// Initialize this [`VMR`] by initializing the page table information
+    /// using the live page tables.
+    ///
+    /// # Safety
+    ///
+    /// This [`VMR`] will take ownership of the page table parts, so the caller
+    /// must guarantee that this range covers a portion of the address space
+    /// that can never be freed.
+    pub unsafe fn initialize_from_page_tables(&self) {
+        let start = VirtAddr::from(self.start_pfn << PAGE_SHIFT);
+        let end = VirtAddr::from(self.end_pfn << PAGE_SHIFT);
+        let count = end.to_pgtbl_idx::<3>() - start.to_pgtbl_idx::<3>();
+        let mut vec = self.pgtbl_parts.lock_write();
+        let idx_first = (usize::from(start) >> 39) & 0x1FF;
+
+        for idx in 0..count {
+            // SAFETY - the caller is responsible for choosing an address
+            // range that satisfies the safety requirements of allocating a
+            // page table part from the live page tables.
+            let part = unsafe { PageTablePart::new_from_live_page_table(idx_first + idx) };
+            vec.push(part);
+        }
     }
 
     /// Returns the virtual start and end addresses for this region

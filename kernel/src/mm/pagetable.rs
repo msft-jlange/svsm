@@ -12,8 +12,8 @@ use crate::cpu::idt::common::PageFaultError;
 use crate::cpu::registers::RFlags;
 use crate::error::SvsmError;
 use crate::mm::{
-    phys_to_virt, virt_to_phys, PageBox, PGTABLE_LVL3_IDX_PTE_SELFMAP, PGTABLE_LVL3_IDX_SHARED,
-    SVSM_PTE_BASE,
+    phys_to_virt, virt_from_pt_parts, virt_to_phys, PageBox, PGTABLE_LVL3_IDX_PTE_SELFMAP,
+    PGTABLE_LVL3_IDX_SHARED, SVSM_PTE_BASE,
 };
 use crate::platform::SvsmPlatform;
 use crate::types::{PageSize, PAGE_SIZE, PAGE_SIZE_1G, PAGE_SIZE_2M};
@@ -1435,6 +1435,31 @@ impl PageTablePart {
         PageTablePart {
             raw: None,
             idx: PageTable::index::<3>(start),
+        }
+    }
+
+    /// Creates a new `PageTablePart` to represent a portion of the current
+    /// page table.
+    pub unsafe fn new_from_live_page_table(idx: usize) -> Self {
+        // Capture the raw page table part from the self-map of the current
+        // page table.
+        let pt_part_va = virt_from_pt_parts(
+            PGTABLE_LVL3_IDX_PTE_SELFMAP,
+            PGTABLE_LVL3_IDX_PTE_SELFMAP,
+            PGTABLE_LVL3_IDX_PTE_SELFMAP,
+            PGTABLE_LVL3_IDX_SHARED,
+        );
+
+        let pt_part = pt_part_va.as_mut_ptr::<RawPageTablePart>();
+        // SAFETY - the self-map address can be coerced into a raw page table
+        // part because they have identical formats.  However, the self-map
+        // address can never be freed, so once this is cast into a Box,
+        // the Box must never be freed.  The caller must guarantee that to
+        // be the case.
+        let raw_pt = unsafe { Box::from_raw(pt_part) };
+        Self {
+            raw: Some(raw_pt),
+            idx,
         }
     }
 

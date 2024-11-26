@@ -6,6 +6,7 @@
 
 pub mod address_space;
 pub mod alloc;
+pub mod globalmem;
 pub mod guestmem;
 pub mod mappings;
 pub mod memory;
