@@ -15,6 +15,7 @@ use crate::platform::SVSM_PLATFORM;
 use crate::types::{TPR_IPI, TPR_SYNCH};
 use crate::utils::{ScopedMut, ScopedRef};
 
+use core::arch::asm;
 use core::cell::{Cell, UnsafeCell};
 use core::mem::{size_of, MaybeUninit};
 use core::ptr;
@@ -245,6 +246,7 @@ unsafe fn receive_single_ipi(board: &IpiBoard) {
     let request = unsafe { board.request.get().assume_init() };
     match request {
         IpiRequest::IpiShared => {
+            unsafe { asm!("int 61h") }
             // SAFETY; the IPI message is known to be present and accessible.
             let msg = unsafe {
                 let ptr = board.message.get() as *const IpiMessage;
@@ -253,6 +255,7 @@ unsafe fn receive_single_ipi(board: &IpiBoard) {
             handle_ipi_message(msg.as_ref());
         }
         IpiRequest::IpiMut => {
+            unsafe { asm!("int 62h") }
             // SAFETY; the IPI message is known to be present and accessible
             // and not borrowed, making it eligible for a mutable borrow.
             let mut msg = unsafe {
@@ -265,9 +268,11 @@ unsafe fn receive_single_ipi(board: &IpiBoard) {
 }
 
 pub fn handle_ipi_interrupt(request_set: &AtomicCpuSet) {
+    unsafe { asm!("int 50h") }
     // Enumerate all CPUs in the request set and process the request identified
     // by each.
     for cpu_index in request_set.iter(Ordering::Acquire) {
+        unsafe { asm!("int 51h") }
         // Handle the request posted on the bulletin board of the requesting
         // CPU.
         let cpu = PERCPU_AREAS.get_by_cpu_index(cpu_index);
@@ -285,17 +290,20 @@ pub fn handle_ipi_interrupt(request_set: &AtomicCpuSet) {
             // board may cease to be valid as soon as this decrement
             // completes.
             ipi_board.pending.fetch_sub(1, Ordering::Release);
+            asm!("int 52h");
         }
     }
 }
 
 fn handle_ipi_message(msg: &IpiMessage) {
+    unsafe {asm!("int 38h") }
     match msg {
         IpiMessage::NoIpiMut(_) => {}
     }
 }
 
 fn handle_ipi_message_mut(msg: &mut IpiMessage) {
+    unsafe {asm!("int 30h") }
     match msg {
         IpiMessage::NoIpiMut(val) => *val = 0,
     }
