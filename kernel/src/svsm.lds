@@ -2,7 +2,7 @@ OUTPUT_ARCH(i386:x86-64)
 
 SECTIONS
 {
-	. = 0xffffff8000000000;
+	. = 0xffffff0000000000;
 	.text : {
 		*(.startup.*)
 		*(.text)
