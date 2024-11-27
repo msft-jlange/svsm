@@ -185,12 +185,8 @@ pub const SVSM_PERCPU_VMSA_BASE: VirtAddr = SVSM_PERCPU_BASE.const_add(4 * SIZE_
 /// Region for PerCPU Stacks
 pub const SVSM_PERCPU_STACKS_BASE: VirtAddr = SVSM_PERCPU_BASE.const_add(SIZE_LEVEL1);
 
-/// Stack address of the per-cpu init task
-pub const SVSM_STACKS_INIT_TASK: VirtAddr = SVSM_PERCPU_STACKS_BASE;
-
 /// Shadow stack address of the per-cpu init task
-pub const SVSM_SHADOW_STACKS_INIT_TASK: VirtAddr =
-    SVSM_STACKS_INIT_TASK.const_add(STACK_TOTAL_SIZE);
+pub const SVSM_SHADOW_STACKS_INIT_TASK: VirtAddr = SVSM_PERCPU_STACKS_BASE;
 
 /// Stack address to use during context switches
 pub const SVSM_CONTEXT_SWITCH_STACK: VirtAddr = SVSM_SHADOW_STACKS_INIT_TASK.const_add(PAGE_SIZE);
@@ -233,12 +229,8 @@ pub const SVSM_PERTASK_BASE: VirtAddr = virt_from_idx(PGTABLE_LVL3_IDX_PERTASK);
 /// End address of task memory region
 pub const SVSM_PERTASK_END: VirtAddr = SVSM_PERTASK_BASE.const_add(SIZE_LEVEL3);
 
-/// Kernel stack for a task
-pub const SVSM_PERTASK_STACK_BASE: VirtAddr = SVSM_PERTASK_BASE;
-
 /// Kernel shadow stack for normal execution of a task
-pub const SVSM_PERTASK_SHADOW_STACK_BASE: VirtAddr =
-    SVSM_PERTASK_STACK_BASE.const_add(STACK_TOTAL_SIZE);
+pub const SVSM_PERTASK_SHADOW_STACK_BASE: VirtAddr = SVSM_PERTASK_BASE;
 
 /// Kernel shadow stack for exception handling
 pub const SVSM_PERTASK_EXCEPTION_SHADOW_STACK_BASE: VirtAddr =

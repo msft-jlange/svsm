@@ -4,11 +4,17 @@
 //
 // Author: Jon Lange (jlange@microsoft.com)
 
-use super::pagetable::PTEntryFlags;
-use super::vm::VMR;
-use super::{SVSM_SHARED_BASE, SVSM_SHARED_END};
-use crate::locking::SpinLock;
+extern crate alloc;
 
+use super::pagetable::PTEntryFlags;
+use super::vm::{Mapping, VMR};
+use super::{SVSM_SHARED_BASE, SVSM_SHARED_END, SVSM_SHARED_STACK_BASE};
+use crate::address::VirtAddr;
+use crate::error::SvsmError;
+use crate::locking::SpinLock;
+use crate::types::PAGE_SIZE;
+
+use alloc::sync::Arc;
 use bootlib::kernel_launch::KernelLaunchInfo;
 use core::cell::OnceCell;
 
@@ -26,4 +32,12 @@ pub fn init_global_mem(_launch_info: &KernelLaunchInfo) {
         }
         vmr
     });
+}
+
+pub fn map_shared_stack(mapping: Arc<Mapping>) -> Result<VirtAddr, SvsmError> {
+    SHARED_VMR
+        .lock()
+        .get()
+        .unwrap()
+        .insert_aligned(SVSM_SHARED_STACK_BASE, mapping, PAGE_SIZE)
 }

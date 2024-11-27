@@ -18,11 +18,11 @@ use crate::cpu::idt::svsm::return_new_task;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::shadow_stack::is_cet_ss_supported;
 use crate::cpu::sse::{get_xsave_area_size, sse_restore_context};
-use crate::cpu::X86ExceptionContext;
-use crate::cpu::{irqs_enable, X86GeneralRegs};
+use crate::cpu::{irqs_enable, X86ExceptionContext, X86GeneralRegs};
 use crate::error::SvsmError;
 use crate::fs::FileHandle;
 use crate::locking::{RWLock, SpinLock};
+use crate::mm::globalmem::map_shared_stack;
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::vm::{
     Mapping, ShadowStackInit, VMFileMappingFlags, VMKernelShadowStack, VMKernelStack, VMR,
@@ -30,7 +30,7 @@ use crate::mm::vm::{
 use crate::mm::{
     mappings::create_anon_mapping, mappings::create_file_mapping, PageBox, VMMappingGuard,
     SVSM_PERTASK_BASE, SVSM_PERTASK_END, SVSM_PERTASK_EXCEPTION_SHADOW_STACK_BASE,
-    SVSM_PERTASK_SHADOW_STACK_BASE, SVSM_PERTASK_STACK_BASE, USER_MEM_END, USER_MEM_START,
+    SVSM_PERTASK_SHADOW_STACK_BASE, USER_MEM_END, USER_MEM_START,
 };
 use crate::syscall::{Obj, ObjError, ObjHandle};
 use crate::types::{SVSM_USER_CS, SVSM_USER_DS};
@@ -223,13 +223,13 @@ impl Task {
         }
 
         let (stack, raw_bounds, rsp_offset) = Self::allocate_ktask_stack(cpu, entry, xsa_addr)?;
-        vm_kernel_range.insert_at(SVSM_PERTASK_STACK_BASE, stack)?;
+        let stack_base = map_shared_stack(stack)?;
 
         vm_kernel_range.populate(&mut pgtable);
 
         // Remap at the per-task offset
         let bounds = MemoryRegion::new(
-            SVSM_PERTASK_STACK_BASE + raw_bounds.start().into(),
+            stack_base,
             raw_bounds.len(),
         );
 
@@ -298,7 +298,7 @@ impl Task {
 
         let (stack, raw_bounds, stack_offset) =
             Self::allocate_utask_stack(cpu, user_entry, xsa_addr)?;
-        vm_kernel_range.insert_at(SVSM_PERTASK_STACK_BASE, stack)?;
+        let stack_base = map_shared_stack(stack)?;
 
         vm_kernel_range.populate(&mut pgtable);
 
@@ -306,10 +306,7 @@ impl Task {
         vm_user_range.initialize_lazy()?;
 
         // Remap at the per-task offset
-        let bounds = MemoryRegion::new(
-            SVSM_PERTASK_STACK_BASE + raw_bounds.start().into(),
-            raw_bounds.len(),
-        );
+        let bounds = MemoryRegion::new(stack_base, raw_bounds.len());
 
         Ok(Arc::new(Task {
             rsp: bounds

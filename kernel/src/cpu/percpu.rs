@@ -24,6 +24,7 @@ use crate::hyperv;
 use crate::hyperv::HypercallPagesGuard;
 use crate::locking::{LockGuard, RWLock, RWLockIrqSafe, SpinLock};
 use crate::mm::alloc::allocate_pages;
+use crate::mm::globalmem::map_shared_stack;
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::virtualrange::VirtualRange;
 use crate::mm::vm::{
@@ -35,7 +36,7 @@ use crate::mm::{
     SVSM_PERCPU_BASE, SVSM_PERCPU_CAA_BASE, SVSM_PERCPU_END, SVSM_PERCPU_TEMP_BASE_2M,
     SVSM_PERCPU_TEMP_BASE_4K, SVSM_PERCPU_TEMP_END_2M, SVSM_PERCPU_TEMP_END_4K,
     SVSM_PERCPU_VMSA_BASE, SVSM_SHADOW_STACKS_INIT_TASK, SVSM_SHADOW_STACK_ISST_DF_BASE,
-    SVSM_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
+    SVSM_STACK_IST_DF_BASE,
 };
 use crate::platform::{SvsmPlatform, SVSM_PLATFORM};
 use crate::sev::ghcb::{GhcbPage, GHCB};
@@ -520,14 +521,23 @@ impl PerCpu {
         *self.pgtbl.borrow_mut() = Some(pgtable);
     }
 
-    fn allocate_stack(&self, base: VirtAddr) -> Result<VirtAddr, SvsmError> {
+    fn allocate_stack(&self, base: Option<VirtAddr>) -> Result<VirtAddr, SvsmError> {
         let stack = VMKernelStack::new()?;
-        let top_of_stack = stack.top_of_stack(base);
+        let top_of_stack_offset = stack.top_of_stack(VirtAddr::new(0));
         let mapping = Arc::new(Mapping::new(stack));
 
-        self.vm_range.insert_at(base, mapping)?;
+        // If the caller selected a base address, then it is part of the
+        // per-CPU mapping range.  Otherwise, select an appropriate base
+        // address in the shared stack range.
+        let base_address = match base {
+            Some(va) => {
+                self.vm_range.insert_at(va, mapping)?;
+                va
+            }
+            None => map_shared_stack(mapping)?,
+        };
 
-        Ok(top_of_stack)
+        Ok(base_address + top_of_stack_offset.into())
     }
 
     fn allocate_shadow_stack(
@@ -541,8 +551,8 @@ impl PerCpu {
         Ok(ssp)
     }
 
-    fn allocate_init_stack(&self) -> Result<(), SvsmError> {
-        let init_stack = Some(self.allocate_stack(SVSM_STACKS_INIT_TASK)?);
+    pub fn allocate_init_stack(&self) -> Result<(), SvsmError> {
+        let init_stack = Some(self.allocate_stack(None)?);
         self.init_stack.set(init_stack);
         Ok(())
     }
@@ -555,7 +565,7 @@ impl PerCpu {
     }
 
     fn allocate_context_switch_stack(&self) -> Result<(), SvsmError> {
-        self.allocate_stack(SVSM_CONTEXT_SWITCH_STACK)?;
+        self.allocate_stack(Some(SVSM_CONTEXT_SWITCH_STACK))?;
         Ok(())
     }
 
@@ -568,7 +578,7 @@ impl PerCpu {
     }
 
     fn allocate_ist_stacks(&self) -> Result<(), SvsmError> {
-        let double_fault_stack = self.allocate_stack(SVSM_STACK_IST_DF_BASE)?;
+        let double_fault_stack = self.allocate_stack(Some(SVSM_STACK_IST_DF_BASE))?;
         self.ist.double_fault_stack.set(Some(double_fault_stack));
 
         Ok(())
@@ -690,8 +700,12 @@ impl PerCpu {
         // Reserve ranges for temporary mappings
         self.initialize_vm_ranges()?;
 
-        // Allocate per-cpu init stack
-        self.allocate_init_stack()?;
+        // Allocate per-cpu init stack.  This is skipped on the BSP because
+        // shared memory services are not yet available, and cannot be made
+        // available until the BSP is constructed and mapped.
+        if self.shared.apic_id != 0 {
+            self.allocate_init_stack()?;
+        }
 
         if is_cet_ss_supported() {
             self.allocate_init_shadow_stack()?;

@@ -357,6 +357,10 @@ pub extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
 
     init_global_mem(&launch_info);
 
+    bsp_percpu
+        .allocate_init_stack()
+        .expect("Failed to allocate BSP stack");
+
     if is_cet_ss_supported() {
         enable_shadow_stacks!(bsp_percpu);
     }
