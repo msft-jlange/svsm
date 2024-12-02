@@ -229,9 +229,9 @@ pub struct PerCpuShared {
     // A set of CPUs that have requested IPI handling by this CPU.
     ipi_requests: AtomicCpuSet,
 
-    // A bulletin board holding an IPI message being offered by this CPU to
-    // other CPUs.
-    ipi_board: Cell<*const IpiBoard>,
+    // A bulletin board holding the state of an IPI message to send to other
+    // CPUs.
+    ipi_board: IpiBoard,
 }
 
 impl PerCpuShared {
@@ -244,8 +244,8 @@ impl PerCpuShared {
             ipi_irr: core::array::from_fn(|_| AtomicU32::new(0)),
             ipi_pending: AtomicBool::new(false),
             nmi_pending: AtomicBool::new(false),
-            ipi_requests: AtomicCpuSet::default(),
-            ipi_board: Cell::new(ptr::null()),
+            ipi_requests: Default::default(),
+            ipi_board: IpiBoard::new(),
         }
     }
 
@@ -322,8 +322,12 @@ impl PerCpuShared {
         self.ipi_requests.add(cpu_index, Ordering::Release);
     }
 
-    pub fn ipi_board(&self) -> *const IpiBoard {
-        self.ipi_board.get()
+    /// # Safety
+    /// The IPI board is not `Sync`, so the caller is responsible for ensuring
+    /// that a reference to the IPI board is only obtained when it is safe to
+    /// do so.
+    pub unsafe fn ipi_board(&self) -> &IpiBoard {
+        &self.ipi_board
     }
 }
 
@@ -505,11 +509,12 @@ impl PerCpu {
     ///
     /// * `target_set` - The set of CPUs to which to send the IPI.
     /// * `ipi_message` - The message to send.
-    pub fn send_multicast_ipi(&self, target_set: IpiTarget, ipi_message: &IpiMessage) {
+    pub fn send_multicast_ipi(&self, target_set: IpiTarget, ipi_message: IpiMessage) {
         send_ipi(
             target_set,
             self.shared.cpu_index,
-            IpiRequest::IpiShared(ipi_message),
+            ipi_message,
+            IpiRequest::IpiShared,
             &self.shared.ipi_board,
         );
     }
@@ -519,13 +524,15 @@ impl PerCpu {
     ///
     /// * `cpu_index` - The index of the CPU to receive the message.
     /// * `ipi_message` - The message to send.
-    pub fn send_unicast_ipi(&self, cpu_index: usize, ipi_message: &mut IpiMessage) {
+    pub fn send_unicast_ipi(&self, cpu_index: usize, ipi_message: IpiMessage) -> IpiMessage {
         send_ipi(
             IpiTarget::Single(cpu_index),
             self.shared.cpu_index,
-            IpiRequest::IpiMut(ipi_message),
+            ipi_message,
+            IpiRequest::IpiMut,
             &self.shared.ipi_board,
-        );
+        )
+        .unwrap()
     }
 
     /// Handles an IPI interrupt.

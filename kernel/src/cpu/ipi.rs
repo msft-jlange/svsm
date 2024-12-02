@@ -15,8 +15,8 @@ use crate::platform::SVSM_PLATFORM;
 use crate::types::{TPR_IPI, TPR_SYNCH};
 use crate::utils::{ScopedMut, ScopedRef};
 
-use core::cell::Cell;
-use core::ptr;
+use core::cell::{Cell, UnsafeCell};
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy, Debug)]
@@ -36,37 +36,40 @@ pub enum IpiTarget {
 
 #[derive(Debug)]
 pub enum IpiMessage {
-    NoIpi,
+    NoOperation,
     NoIpiMut(u32),
 }
 
-#[derive(Clone, Copy, Debug)]
+// Drop is implemented not because any drop is required, but to expressly
+// ensure that the type cannot be `Copy`.
+impl Drop for IpiMessage {
+    fn drop(&mut self) {}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IpiRequest {
-    NoIpi,
-    IpiMut(*mut IpiMessage),
-    IpiShared(*const IpiMessage),
+    IpiMut,
+    IpiShared,
 }
 
-impl Default for IpiRequest {
-    fn default() -> Self {
-        Self::NoIpi
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct IpiBoard {
     // The number of CPUs that have yet to complete the request.
     pending: AtomicUsize,
 
     // The request description.
-    request: IpiRequest,
+    request: Cell<MaybeUninit<IpiRequest>>,
+
+    // Space to store the IPI message being sent.
+    message: UnsafeCell<MaybeUninit<IpiMessage>>,
 }
 
 impl IpiBoard {
-    pub fn new(request: IpiRequest) -> Self {
+    pub fn new() -> Self {
         Self {
-            request,
+            request: Cell::new(MaybeUninit::zeroed()),
             pending: AtomicUsize::new(0),
+            message: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 }
@@ -74,17 +77,27 @@ impl IpiBoard {
 pub fn send_ipi(
     mut target_set: IpiTarget,
     sender_cpu_index: usize,
+    ipi_message: IpiMessage,
     ipi_request: IpiRequest,
-    cpu_ipi_board: &Cell<*const IpiBoard>,
-) {
+    ipi_board: &IpiBoard,
+) -> Option<IpiMessage> {
     // Raise TPR to synch level to prevent reentrant attempts to send an IPI.
     let tpr_guard = TprGuard::raise(TPR_SYNCH);
 
-    // Create a new IPI board to represent this request and install it in the
-    // sending CPU structure.
-    let ipi_board = IpiBoard::new(ipi_request);
+    // Initialize the IPI board to describe this request.  Since no request
+    // can be outstanding right now, the pending count must be zero, and
+    // there can be no other CPUs that are have taken references to the IPI
+    // board.
+    assert_eq!(ipi_board.pending.load(Ordering::Relaxed), 0);
+    ipi_board.request.set(MaybeUninit::new(ipi_request));
 
-    cpu_ipi_board.set(&ipi_board);
+    // SAFETY; since the IPI board is not yet in use, the message cell can
+    // safely be mutated.
+    let message = unsafe { &mut *ipi_board.message.get() };
+
+    // Move the IPI message into the IPI board.  It will be dropped or copied
+    // out once IPI processing is complete.
+    message.write(ipi_message);
 
     // Enumerate all CPUs in the target set to advise that an IPI message has
     // been posted.
@@ -146,9 +159,10 @@ pub fn send_ipi(
         // Raise TPR to IPI level for consistency with IPI interrupt handling.
         let ipi_tpr_guard = TprGuard::raise(TPR_IPI);
 
-        // SAFETY - the message
+        // SAFETY: the local IPI board is known to be in the correct state
+        // for processing.
         unsafe {
-            receive_single_ipi(ipi_request);
+            receive_single_ipi(ipi_board);
         }
         drop(ipi_tpr_guard);
     }
@@ -164,10 +178,30 @@ pub fn send_ipi(
         core::hint::spin_loop();
     }
 
-    // Clear the bulleting board on the sending CPU.
-    cpu_ipi_board.set(ptr::null());
+    // Clear the IPI board.  If this request will return a response, then
+    // move the response out of the board; otherwise, drop the message that
+    // was placed into the board now that it has been fully consumed.
+    let response = if ipi_request == IpiRequest::IpiMut {
+        // SAFETY: the message in the IPI board will become uninitialized,
+        // so the contents can be moved back into a local variable to be
+        // returned.
+        unsafe {
+            let empty = MaybeUninit::<IpiMessage>::uninit();
+            let response = core::mem::replace(message, empty);
+            Some(response.assume_init())
+        }
+    } else {
+        // SAFETY: The message in the IPI board is initialized and must now
+        // be dropped.
+        unsafe {
+            message.assume_init_drop();
+        }
+        None
+    };
 
     drop(tpr_guard);
+
+    response
 }
 
 fn send_single_ipi_irq(cpu_index: usize, icr: ApicIcr) -> Result<(), SvsmError> {
@@ -201,19 +235,26 @@ fn send_ipi_irq(target_set: IpiTarget) -> Result<(), SvsmError> {
 /// the request is valid.  This is normally ensured by assuming the lifetime
 /// of the request pointer is protected by the lifetime of the bulletin board
 /// that posts it.
-unsafe fn receive_single_ipi(request: IpiRequest) {
+unsafe fn receive_single_ipi(board: &IpiBoard) {
+    // SAFETY: since the caller has indicated that this IPI board is valid,
+    // the request cell is known to be initialized.
+    let request = unsafe { board.request.get().assume_init() };
     match request {
-        IpiRequest::NoIpi => {}
-        IpiRequest::IpiShared(ptr) => {
-            // SAFETY - the validity of this pointer is guaranteed by the
-            // caller.
-            let msg = unsafe { ScopedRef::new(ptr).unwrap() };
+        IpiRequest::IpiShared => {
+            // SAFETY; the IPI message is known to be present and accessible.
+            let msg = unsafe {
+                let ptr = board.message.get() as *const IpiMessage;
+                ScopedRef::<IpiMessage>::new(ptr).unwrap()
+            };
             handle_ipi_message(msg.as_ref());
         }
-        IpiRequest::IpiMut(ptr) => {
-            // SAFETY - the validity of this pointer is guaranteed by the
-            // caller.
-            let mut msg = unsafe { ScopedMut::new(ptr).unwrap() };
+        IpiRequest::IpiMut => {
+            // SAFETY; the IPI message is known to be present and accessible
+            // and not borrowed, making it eligible for a mutable borrow.
+            let mut msg = unsafe {
+                let ptr = board.message.get() as *mut IpiMessage;
+                ScopedMut::<IpiMessage>::new(ptr).unwrap()
+            };
             handle_ipi_message_mut(msg.as_mut());
         }
     }
@@ -227,54 +268,72 @@ pub fn handle_ipi_interrupt(request_set: &AtomicCpuSet) {
         // CPU.
         let cpu = PERCPU_AREAS.get_by_cpu_index(cpu_index);
 
-        // SAFETY - The sending CPU's IPI board is known to be valid because
-        // the sending CPU is present in the request mask.  The IPI board
-        // will be valid at least until this CPU decrements the pending
-        // count.
-        let ipi_board = unsafe { ScopedRef::new(cpu.ipi_board()).unwrap() };
-
-        // SAFETY - the request message is valid as long as the bulletin board
-        // remains valid.
+        // SAFETY; The IPI board is known to be valid since the sending CPU
+        // marked it as valid in this CPU's request bitmap.  The IPI board
+        // is guaranteed to remain valid until the pending count is
+        // decremented.
         unsafe {
-            receive_single_ipi(ipi_board.request);
+            let ipi_board = cpu.ipi_board();
+            receive_single_ipi(cpu.ipi_board());
+
+            // Now that the request has been handled, decrement the count of
+            // pending requests on the sender's bulletin board.  The IPI
+            // board may cease to be valid as soon as this decrement
+            // completes.
+            ipi_board.pending.fetch_sub(1, Ordering::Release);
         }
-
-        // Now that the request has been handled, decrement the count of
-        // pending requests on the sender's bulletin board.  The IPI board
-        // may cease to be valid as soon as this decrement completes.
-        ipi_board.pending.fetch_sub(1, Ordering::Release);
-
-        drop(ipi_board);
     }
 }
 
 fn handle_ipi_message(msg: &IpiMessage) {
     match msg {
-        IpiMessage::NoIpi => {}
+        IpiMessage::NoOperation => {}
         IpiMessage::NoIpiMut(_) => {}
     }
 }
 
 fn handle_ipi_message_mut(msg: &mut IpiMessage) {
     match msg {
-        IpiMessage::NoIpi => {}
+        IpiMessage::NoOperation => {}
         IpiMessage::NoIpiMut(val) => *val = 0,
     }
 }
 
 /// Sends an IPI message to multiple CPUs.
 ///
+/// # Safety
+/// The IPI message must NOT contain any references to data unless that
+/// data is known to be in memory that is visible across CPUs/tasks.
+/// Otherwise, the recipient could attempt to access a pointer that is
+/// invalid in the target context, or - worse - points to completely
+/// incorrect data in the target context.
+///
+/// # Arguments
+///
 /// * `target_set` - The set of CPUs to which to send the IPI.
 /// * `ipi_message` - The message to send.
-pub fn send_multicast_ipi(target_set: IpiTarget, ipi_message: &IpiMessage) {
+pub unsafe fn send_multicast_ipi(target_set: IpiTarget, ipi_message: IpiMessage) {
     this_cpu().send_multicast_ipi(target_set, ipi_message);
 }
 
 /// Sends an IPI message to a single CPU.  Because only a single CPU can
 /// receive the message, the message object can be mutable.
 ///
+/// # Safety
+/// The IPI message must NOT contain any references to data unless that
+/// data is known to be in memory that is visible across CPUs/tasks.
+/// Otherwise, the recipient could attempt to access a pointer that is
+/// invalid in the target context, or - worse - points to completely
+/// incorrect data in the target context.
+///
+/// # Arguments
+///
 /// * `cpu_index` - The index of the CPU to receive the message.
 /// * `ipi_message` - The message to send.
-pub fn send_unicast_ipi(cpu_index: usize, ipi_message: &mut IpiMessage) {
-    this_cpu().send_unicast_ipi(cpu_index, ipi_message);
+///
+/// # Returns
+///
+/// The response message generated by the IPI recipient.
+pub unsafe fn send_unicast_ipi(cpu_index: usize, ipi_message: IpiMessage) -> IpiMessage {
+    this_cpu().send_unicast_ipi(cpu_index, ipi_message)
 }
