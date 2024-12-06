@@ -55,6 +55,7 @@ extern "C" {
     fn asm_entry_sx();
     fn asm_entry_int80();
     fn asm_entry_irq_int_inj();
+    fn asm_entry_unknown_int();
 
     pub static mut HV_DOORBELL_ADDR: usize;
 }
@@ -65,6 +66,13 @@ fn init_ist_vectors() {
 
 pub fn early_idt_init() {
     let mut idt = idt_mut();
+
+    // Initialize the IDT with the unhandled vector handler for all entries,
+    // and then overwrite specified handler entries as required.
+    for vector in 0..0x100 {
+        idt.set_entry(vector, IdtEntry::entry(asm_entry_unknown_int));
+    }
+
     idt.set_entry(DE_VECTOR, IdtEntry::entry(asm_entry_de));
     idt.set_entry(DB_VECTOR, IdtEntry::entry(asm_entry_db));
     idt.set_entry(NMI_VECTOR, IdtEntry::entry(asm_entry_nmi));

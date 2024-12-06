@@ -415,6 +415,9 @@ default_entry_no_ist	name=vc		handler=vmm_communication	error_code=1	vector=29
 // #SX Security Exception (Vector 30)
 default_entry_no_ist	name=sx		handler=panic			error_code=1	vector=30
 
+// Default unhandled interrupt vector
+default_entry_no_ist	name=unknown_int handler=panic			error_code=0	vector=0xFFF
+
 // INT 0x80 system call handler
 default_entry_no_ist	name=int80	handler=system_call		error_code=0	vector=0x80
 
