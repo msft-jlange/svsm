@@ -38,12 +38,12 @@ use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::{irq_nesting_count, this_cpu};
 use crate::cpu::shadow_stack::{is_cet_ss_supported, IS_CET_SUPPORTED, PL0_SSP};
 use crate::cpu::sse::{sse_restore_context, sse_save_context};
-use crate::cpu::IrqGuard;
+use crate::cpu::{IrqGuard, TprGuard};
 use crate::error::SvsmError;
 use crate::fs::Directory;
-use crate::locking::SpinLock;
+use crate::locking::SpinLockTpr;
 use crate::mm::{STACK_TOTAL_SIZE, SVSM_CONTEXT_SWITCH_SHADOW_STACK, SVSM_CONTEXT_SWITCH_STACK};
-use crate::platform::SVSM_PLATFORM;
+use crate::types::TPR_LOCK;
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::arch::{asm, global_asm};
@@ -233,7 +233,7 @@ impl TaskList {
     }
 }
 
-pub static TASKLIST: SpinLock<TaskList> = SpinLock::new(TaskList::new());
+pub static TASKLIST: SpinLockTpr<TaskList> = SpinLockTpr::new(TaskList::new());
 
 /// Creates, initializes and starts a new kernel task. Note that the task has
 /// already started to run before this function returns.
@@ -357,16 +357,18 @@ unsafe fn switch_to(prev: *const Task, next: *const Task) {
 /// function has ran it is safe to call [`schedule()`] on the current CPU.
 pub fn schedule_init() {
     unsafe {
-        let guard = IrqGuard::new();
+        let tpr_guard = TprGuard::raise(TPR_LOCK);
+        let irq_guard = IrqGuard::new();
         let next = task_pointer(this_cpu().schedule_init());
         switch_to(null_mut(), next);
-        drop(guard);
+        drop(irq_guard);
+        drop(tpr_guard);
     }
 }
 
 fn preemption_checks() {
     assert!(irq_nesting_count() == 0);
-    assert!(raw_get_tpr() == 0 || !SVSM_PLATFORM.use_interrupts());
+    assert!(raw_get_tpr() == 0);
 }
 
 /// Perform a task switch and hand the CPU over to the next task on the
@@ -376,7 +378,7 @@ pub fn schedule() {
     // check if preemption is safe
     preemption_checks();
 
-    let guard = IrqGuard::new();
+    let tpr_guard = TprGuard::raise(TPR_LOCK);
 
     let work = this_cpu().schedule_prepare();
 
@@ -405,8 +407,12 @@ pub fn schedule() {
             let b = task_pointer(next);
             sse_save_context(u64::from((*a).xsa.vaddr()));
 
-            // Switch tasks
+            // Switch tasks.  This requires disabling interrupts so no
+            // interrupt can be taken while tke stack is in an inconsistent
+            // state.
+            let guard = IrqGuard::new();
             switch_to(a, b);
+            drop(guard);
 
             // We're now in the context of task pointed to by 'a'
             // which was previously scheduled out.
@@ -414,7 +420,7 @@ pub fn schedule() {
         }
     }
 
-    drop(guard);
+    drop(tpr_guard);
 
     // If the previous task had terminated then we can release
     // it's reference here.

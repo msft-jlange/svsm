@@ -17,6 +17,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::address::{Address, VirtAddr};
 use crate::cpu::idt::svsm::return_new_task;
 use crate::cpu::irq_state::EFLAGS_IF;
+use crate::cpu::lower_tpr;
 use crate::cpu::percpu::{current_task, PerCpu};
 use crate::cpu::shadow_stack::is_cet_ss_supported;
 use crate::cpu::sse::{get_xsave_area_size, sse_restore_context};
@@ -24,7 +25,7 @@ use crate::cpu::X86ExceptionContext;
 use crate::cpu::{irqs_enable, X86GeneralRegs};
 use crate::error::SvsmError;
 use crate::fs::{opendir, stdout_open, Directory, FileHandle};
-use crate::locking::{RWLock, SpinLock};
+use crate::locking::{RWLockTpr, SpinLockTpr};
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::vm::{
     Mapping, ShadowStackInit, VMFileMappingFlags, VMKernelShadowStack, VMKernelStack, VMR,
@@ -36,7 +37,7 @@ use crate::mm::{
 };
 use crate::platform::SVSM_PLATFORM;
 use crate::syscall::{Obj, ObjError, ObjHandle};
-use crate::types::{SVSM_USER_CS, SVSM_USER_DS};
+use crate::types::{SVSM_USER_CS, SVSM_USER_DS, TPR_LOCK};
 use crate::utils::MemoryRegion;
 use intrusive_collections::{intrusive_adapter, LinkedListAtomicLink};
 
@@ -135,7 +136,7 @@ pub struct Task {
     pub exception_shadow_stack: VirtAddr,
 
     /// Page table that is loaded when the task is scheduled
-    pub page_table: SpinLock<PageBox<PageTable>>,
+    pub page_table: SpinLockTpr<PageBox<PageTable>>,
 
     /// Task virtual memory range for use at CPL 0
     vm_kernel_range: VMR,
@@ -144,7 +145,7 @@ pub struct Task {
     vm_user_range: Option<VMR>,
 
     /// State relevant for scheduler
-    sched_state: RWLock<TaskSchedState>,
+    sched_state: RWLockTpr<TaskSchedState>,
 
     /// User-visible name of task
     name: String,
@@ -162,7 +163,7 @@ pub struct Task {
     runlist_link: LinkedListAtomicLink,
 
     /// Objects shared among threads within the same process
-    objs: Arc<RWLock<BTreeMap<ObjHandle, Arc<dyn Obj>>>>,
+    objs: Arc<RWLockTpr<BTreeMap<ObjHandle, Arc<dyn Obj>>>>,
 }
 
 // SAFETY: Send + Sync is required for Arc<Task> to implement Send. All members
@@ -256,10 +257,10 @@ impl Task {
             xsa,
             stack_bounds: bounds,
             exception_shadow_stack,
-            page_table: SpinLock::new(pgtable),
+            page_table: SpinLockTpr::new(pgtable),
             vm_kernel_range,
             vm_user_range: None,
-            sched_state: RWLock::new(TaskSchedState {
+            sched_state: RWLockTpr::new(TaskSchedState {
                 idle_task: false,
                 state: TaskState::RUNNING,
                 cpu: cpu.get_apic_id(),
@@ -269,7 +270,7 @@ impl Task {
             rootdir: opendir("/")?,
             list_link: LinkedListAtomicLink::default(),
             runlist_link: LinkedListAtomicLink::default(),
-            objs: Arc::new(RWLock::new(BTreeMap::new())),
+            objs: Arc::new(RWLockTpr::new(BTreeMap::new())),
         }))
     }
 
@@ -341,10 +342,10 @@ impl Task {
             xsa,
             stack_bounds: bounds,
             exception_shadow_stack,
-            page_table: SpinLock::new(pgtable),
+            page_table: SpinLockTpr::new(pgtable),
             vm_kernel_range,
             vm_user_range: Some(vm_user_range),
-            sched_state: RWLock::new(TaskSchedState {
+            sched_state: RWLockTpr::new(TaskSchedState {
                 idle_task: false,
                 state: TaskState::RUNNING,
                 cpu: cpu.get_apic_id(),
@@ -354,7 +355,7 @@ impl Task {
             rootdir: root,
             list_link: LinkedListAtomicLink::default(),
             runlist_link: LinkedListAtomicLink::default(),
-            objs: Arc::new(RWLock::new(BTreeMap::new())),
+            objs: Arc::new(RWLockTpr::new(BTreeMap::new())),
         }))
     }
 
@@ -759,12 +760,13 @@ unsafe fn setup_new_task_common(xsa_addr: u64) {
     // Re-enable IRQs here, as they are still disabled from the
     // schedule()/sched_init() functions. After the context switch the IrqGuard
     // from the previous task is not dropped, which causes IRQs to stay
-    // disabled in the new task.
+    // disabled in the new task.  TPR needs to be lowered for the same reason.
     // This only needs to be done for the first time a task runs. Any
-    // subsequent task switches will go through schedule() and there the guard
-    // is dropped, re-enabling IRQs.
+    // subsequent task switches will go through schedule() and there the guards
+    // are dropped, re-enabling IRQs and restoring TPR.
 
     irqs_enable();
+    lower_tpr(TPR_LOCK);
 
     // SAFETY: The caller takes responsibility for the correctness of the save
     // area address.
