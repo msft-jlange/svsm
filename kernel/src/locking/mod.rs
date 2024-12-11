@@ -10,10 +10,9 @@ pub mod spinlock;
 
 pub use common::{IrqGuardLocking, IrqLocking, TprGuardLocking};
 pub use rwlock::{
-    RWLock, RWLockAnyTpr, RWLockIrqSafe, RWLockTpr, ReadLockGuard, ReadLockGuardAnyTpr,
-    ReadLockGuardIrqSafe, WriteLockGuard, WriteLockGuardAnyTpr, WriteLockGuardIrqSafe,
+    RWLock, RWLockIrqSafe, RWLockTpr, ReadLockGuard, ReadLockGuardIrqSafe, ReadLockGuardTpr,
+    WriteLockGuard, WriteLockGuardIrqSafe, WriteLockGuardTpr,
 };
 pub use spinlock::{
-    LockGuard, LockGuardAnyTpr, LockGuardIrqSafe, RawLockGuard, SpinLock, SpinLockAnyTpr,
-    SpinLockIrqSafe, SpinLockTpr,
+    LockGuard, LockGuardIrqSafe, LockGuardTpr, RawLockGuard, SpinLock, SpinLockIrqSafe, SpinLockTpr,
 };

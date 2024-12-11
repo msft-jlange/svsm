@@ -7,10 +7,8 @@ use crate::cpu::{IrqGuard, TprGuard};
 use core::marker::PhantomData;
 
 /// Abstracts TPR and interrupt state handling when taking and releasing
-/// locks. There are three implemenations:
+/// locks. There are two implemenations:
 ///
-///   * [IrqUnsafeLocking] implements the methods as no-ops and does not change
-///     any IRQ or TPR state.
 ///   * [IrqGuardLocking] actually disables and enables IRQs in the methods,
 ///     ensuring that no interrupt can be taken while the lock is held.
 ///   * [TprGuardLocking] raises and lowers TPR while the lock is held,
@@ -26,18 +24,6 @@ pub trait IrqLocking {
     ///
     /// New instance of implementing struct.
     fn acquire_lock() -> Self;
-}
-
-/// Implements the IRQ state handling methods as no-ops. Locks defined with
-/// this state handler are not safe with respect to reentrancy due to
-/// interrupt delivery.
-#[derive(Debug, Default)]
-pub struct IrqUnsafeLocking;
-
-impl IrqLocking for IrqUnsafeLocking {
-    fn acquire_lock() -> Self {
-        Self {}
-    }
 }
 
 /// Implements the state handling methods for locks that disable interrupts.

@@ -41,10 +41,9 @@ impl<T, I> Deref for RawReadLockGuard<'_, T, I> {
     }
 }
 
-pub type ReadLockGuard<'a, T> = RawReadLockGuard<'a, T, IrqUnsafeLocking>;
 pub type ReadLockGuardIrqSafe<'a, T> = RawReadLockGuard<'a, T, IrqGuardLocking>;
-pub type ReadLockGuardAnyTpr<'a, T, const TPR: usize> =
-    RawReadLockGuard<'a, T, TprGuardLocking<TPR>>;
+pub type ReadLockGuardTpr<'a, T, const TPR: usize> = RawReadLockGuard<'a, T, TprGuardLocking<TPR>>;
+pub type ReadLockGuard<'a, T> = ReadLockGuardTpr<'a, T, { TPR_LOCK }>;
 
 /// A guard that provides exclusive write access to the data protected by [`RWLock`]
 #[derive(Debug)]
@@ -83,10 +82,10 @@ impl<T, I> DerefMut for RawWriteLockGuard<'_, T, I> {
     }
 }
 
-pub type WriteLockGuard<'a, T> = RawWriteLockGuard<'a, T, IrqUnsafeLocking>;
 pub type WriteLockGuardIrqSafe<'a, T> = RawWriteLockGuard<'a, T, IrqGuardLocking>;
-pub type WriteLockGuardAnyTpr<'a, T, const TPR: usize> =
+pub type WriteLockGuardTpr<'a, T, const TPR: usize> =
     RawWriteLockGuard<'a, T, TprGuardLocking<TPR>>;
+pub type WriteLockGuard<'a, T> = WriteLockGuardTpr<'a, T, { TPR_LOCK }>;
 
 /// A simple Read-Write Lock (RWLock) that allows multiple readers or
 /// one exclusive writer.
@@ -281,10 +280,9 @@ impl<T, I: IrqLocking> RawRWLock<T, I> {
     }
 }
 
-pub type RWLock<T> = RawRWLock<T, IrqUnsafeLocking>;
 pub type RWLockIrqSafe<T> = RawRWLock<T, IrqGuardLocking>;
-pub type RWLockAnyTpr<T, const TPR: usize> = RawRWLock<T, TprGuardLocking<TPR>>;
-pub type RWLockTpr<T> = RWLockAnyTpr<T, { TPR_LOCK }>;
+pub type RWLockTpr<T, const TPR: usize> = RawRWLock<T, TprGuardLocking<TPR>>;
+pub type RWLock<T> = RWLockTpr<T, { TPR_LOCK }>;
 
 mod tests {
     #[test]

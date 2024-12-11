@@ -41,7 +41,7 @@ use crate::cpu::sse::{sse_restore_context, sse_save_context};
 use crate::cpu::{IrqGuard, TprGuard};
 use crate::error::SvsmError;
 use crate::fs::Directory;
-use crate::locking::SpinLockTpr;
+use crate::locking::SpinLock;
 use crate::mm::{STACK_TOTAL_SIZE, SVSM_CONTEXT_SWITCH_SHADOW_STACK, SVSM_CONTEXT_SWITCH_STACK};
 use crate::types::TPR_LOCK;
 use alloc::sync::Arc;
@@ -232,7 +232,7 @@ impl TaskList {
     }
 }
 
-pub static TASKLIST: SpinLockTpr<TaskList> = SpinLockTpr::new(TaskList::new());
+pub static TASKLIST: SpinLock<TaskList> = SpinLock::new(TaskList::new());
 
 /// Creates, initializes and starts a new kernel task. Note that the task has
 /// already started to run before this function returns.

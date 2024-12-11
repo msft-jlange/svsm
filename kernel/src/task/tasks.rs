@@ -24,7 +24,7 @@ use crate::cpu::X86ExceptionContext;
 use crate::cpu::{irqs_enable, X86GeneralRegs};
 use crate::error::SvsmError;
 use crate::fs::{opendir, Directory, FileHandle};
-use crate::locking::{RWLockTpr, SpinLockTpr};
+use crate::locking::{RWLock, SpinLock};
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::vm::{
     Mapping, ShadowStackInit, VMFileMappingFlags, VMKernelShadowStack, VMKernelStack, VMR,
@@ -135,7 +135,7 @@ pub struct Task {
     pub exception_shadow_stack: VirtAddr,
 
     /// Page table that is loaded when the task is scheduled
-    pub page_table: SpinLockTpr<PageBox<PageTable>>,
+    pub page_table: SpinLock<PageBox<PageTable>>,
 
     /// Task virtual memory range for use at CPL 0
     vm_kernel_range: VMR,
@@ -144,7 +144,7 @@ pub struct Task {
     vm_user_range: Option<VMR>,
 
     /// State relevant for scheduler
-    sched_state: RWLockTpr<TaskSchedState>,
+    sched_state: RWLock<TaskSchedState>,
 
     /// ID of the task
     id: u32,
@@ -159,7 +159,7 @@ pub struct Task {
     runlist_link: LinkedListAtomicLink,
 
     /// Objects shared among threads within the same process
-    objs: Arc<RWLockTpr<BTreeMap<ObjHandle, Arc<dyn Obj>>>>,
+    objs: Arc<RWLock<BTreeMap<ObjHandle, Arc<dyn Obj>>>>,
 }
 
 // SAFETY: Send + Sync is required for Arc<Task> to implement Send. All members
@@ -249,10 +249,10 @@ impl Task {
             xsa,
             stack_bounds: bounds,
             exception_shadow_stack,
-            page_table: SpinLockTpr::new(pgtable),
+            page_table: SpinLock::new(pgtable),
             vm_kernel_range,
             vm_user_range: None,
-            sched_state: RWLockTpr::new(TaskSchedState {
+            sched_state: RWLock::new(TaskSchedState {
                 idle_task: false,
                 state: TaskState::RUNNING,
                 cpu: cpu.get_apic_id(),
@@ -261,7 +261,7 @@ impl Task {
             rootdir: opendir("/")?,
             list_link: LinkedListAtomicLink::default(),
             runlist_link: LinkedListAtomicLink::default(),
-            objs: Arc::new(RWLockTpr::new(BTreeMap::new())),
+            objs: Arc::new(RWLock::new(BTreeMap::new())),
         }))
     }
 
@@ -332,10 +332,10 @@ impl Task {
             xsa,
             stack_bounds: bounds,
             exception_shadow_stack,
-            page_table: SpinLockTpr::new(pgtable),
+            page_table: SpinLock::new(pgtable),
             vm_kernel_range,
             vm_user_range: Some(vm_user_range),
-            sched_state: RWLockTpr::new(TaskSchedState {
+            sched_state: RWLock::new(TaskSchedState {
                 idle_task: false,
                 state: TaskState::RUNNING,
                 cpu: cpu.get_apic_id(),
@@ -344,7 +344,7 @@ impl Task {
             rootdir: root,
             list_link: LinkedListAtomicLink::default(),
             runlist_link: LinkedListAtomicLink::default(),
-            objs: Arc::new(RWLockTpr::new(BTreeMap::new())),
+            objs: Arc::new(RWLock::new(BTreeMap::new())),
         }))
     }
 
