@@ -19,6 +19,7 @@ use svsm::cpu::control_regs::{cr0_init, cr4_init};
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table};
 use svsm::cpu::gdt::GLOBAL_GDT;
 use svsm::cpu::idt::svsm::{early_idt_init, idt_init};
+use svsm::cpu::ipi::{test_ipi, test_mut_ipi};
 use svsm::cpu::percpu::{this_cpu, PerCpu};
 use svsm::cpu::shadow_stack::{
     determine_cet_support, is_cet_ss_supported, SCetFlags, MODE_64BIT, S_CET,
@@ -305,6 +306,9 @@ pub extern "C" fn svsm_main() {
     log::info!("{} CPU(s) present", nr_cpus);
 
     start_secondary_cpus(&**SVSM_PLATFORM, &cpus);
+
+    test_ipi();
+    test_mut_ipi();
 
     if let Err(e) = SVSM_PLATFORM.prepare_fw(&config, new_kernel_region(&LAUNCH_INFO)) {
         panic!("Failed to prepare guest FW: {e:#?}");

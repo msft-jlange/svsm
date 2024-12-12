@@ -15,7 +15,6 @@ use crate::platform::SVSM_PLATFORM;
 use crate::types::{TPR_IPI, TPR_SYNCH};
 use crate::utils::{ScopedMut, ScopedRef};
 
-use core::arch::asm;
 use core::cell::{Cell, UnsafeCell};
 use core::mem;
 use core::mem::MaybeUninit;
@@ -515,53 +514,44 @@ pub fn send_unicast_ipi<M: IpiMessageMut>(cpu_index: usize, ipi_message: &mut M)
     this_cpu().send_unicast_ipi(cpu_index, ipi_message);
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::cpu::ipi::*;
+#[derive(Copy, Clone, Debug)]
+struct TestIpi {
+    value: usize,
+}
 
-    #[derive(Copy, Clone, Debug)]
-    struct TestIpi {
-        value: usize,
+/// # Safety
+/// The test IPI method has no references and can safely use the default
+/// copy implementations from the IPI message traits.
+unsafe impl IpiMessage for TestIpi {
+    fn invoke(&self) {
+        assert_eq!(self.value, 4);
     }
+}
 
-    /// # Safety
-    /// The test IPI method has no references and can safely use the default
-    /// copy implementations from the IPI message traits.
-    unsafe impl IpiMessage for TestIpi {
-        fn invoke(&self) {
-            assert_eq!(self.value, 4);
-        }
+/// # Safety
+/// The test IPI method has no references and can safely use the default
+/// copy implementations from the IPI message traits.
+unsafe impl IpiMessageMut for TestIpi {
+    fn invoke(&mut self) {
+        self.value += 1;
     }
+}
 
-    /// # Safety
-    /// The test IPI method has no references and can safely use the default
-    /// copy implementations from the IPI message traits.
-    unsafe impl IpiMessageMut for TestIpi {
-        fn invoke(&mut self) {
-            self.value += 1;
-        }
+pub fn test_ipi() {
+    // IPI testing is only possible on platforms that support SVSM
+    // interrupts.
+    if SVSM_PLATFORM.use_interrupts() {
+        let message = TestIpi { value: 4 };
+        send_multicast_ipi(IpiTarget::All, &message);
     }
+}
 
-    #[test]
-    #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
-    fn test_ipi() {
-        // IPI testing is only possible on platforms that support SVSM
-        // interrupts.
-        if SVSM_PLATFORM.use_interrupts() {
-            let message = TestIpi { value: 4 };
-            send_multicast_ipi(IpiTarget::All, &message);
-        }
-    }
-
-    #[test]
-    #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
-    fn test_mut_ipi() {
-        // IPI testing is only possible on platforms that support SVSM
-        // interrupts.
-        if SVSM_PLATFORM.use_interrupts() {
-            let mut message = TestIpi { value: 4 };
-            send_unicast_ipi(0, &mut message);
-            assert_eq!(message.value, 5);
-        }
+pub fn test_mut_ipi() {
+    // IPI testing is only possible on platforms that support SVSM
+    // interrupts.
+    if SVSM_PLATFORM.use_interrupts() {
+        let mut message = TestIpi { value: 4 };
+        send_unicast_ipi(0, &mut message);
+        assert_eq!(message.value, 5);
     }
 }
