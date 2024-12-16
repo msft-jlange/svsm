@@ -168,6 +168,10 @@ impl PTEntryFlags {
     pub fn task_data_ro() -> Self {
         Self::PRESENT | Self::NX | Self::ACCESSED
     }
+
+    pub fn is_global(&self) -> bool {
+        self.contains(Self::GLOBAL)
+    }
 }
 
 /// Represents paging mode.
