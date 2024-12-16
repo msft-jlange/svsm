@@ -5,7 +5,7 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::address::{Address, VirtAddr};
-use crate::cpu::{flush_tlb_global_percpu, flush_tlb_global_sync};
+use crate::cpu::TlbFlushScope;
 use crate::error::SvsmError;
 use crate::locking::RWLock;
 use crate::mm::pagetable::{PTEntryFlags, PageTable, PageTablePart};
@@ -464,10 +464,15 @@ impl VMR {
         let mut cursor = tree.find_mut(&addr);
         if let Some(node) = cursor.get() {
             self.unmap_vmm(node);
-            if self.per_cpu {
-                flush_tlb_global_percpu();
+            let flush_scope = if self.pt_flags.is_global() {
+                TlbFlushScope::AllGlobal
             } else {
-                flush_tlb_global_sync();
+                TlbFlushScope::AllNonGlobal
+            };
+            if self.per_cpu {
+                flush_scope.flush_percpu();
+            } else {
+                flush_scope.flush_all();
             }
         }
         cursor.remove().ok_or(SvsmError::Mem)
