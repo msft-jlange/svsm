@@ -240,7 +240,6 @@ impl IrqState {
     ///
     /// * `tpr_value` - The new TPR value.  Must be greater than or equal to
     ///   the current TPR value.
-    #[inline(always)]
     pub fn raise_tpr(&self, tpr_value: usize) {
         assert!(tpr_value >= raw_get_tpr());
         raw_set_tpr(tpr_value);
@@ -257,7 +256,6 @@ impl IrqState {
     ///
     /// * `tpr_value` - The TPR from which the caller would like to lower.
     ///   Must be less than or equal to the current TPR.
-    #[inline(always)]
     pub fn lower_tpr(&self, tpr_value: usize) {
         debug_assert!(tpr_value <= raw_get_tpr());
 
@@ -411,46 +409,42 @@ mod tests {
             raw_irqs_disable();
         }
     }
+}
 
-    #[test]
-    #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
-    fn tpr_test() {
-        if SVSM_PLATFORM.use_interrupts() {
-            assert_eq!(raw_get_tpr(), 0);
-            raise_tpr(7);
-            assert_eq!(raw_get_tpr(), 7);
-            raise_tpr(8);
-            assert_eq!(raw_get_tpr(), 8);
-            lower_tpr(8);
-            assert_eq!(raw_get_tpr(), 7);
-            lower_tpr(7);
-            assert_eq!(raw_get_tpr(), 0);
-        }
+pub fn tpr_test() {
+    if SVSM_PLATFORM.use_interrupts() {
+        assert_eq!(raw_get_tpr(), 0);
+        raise_tpr(7);
+        assert_eq!(raw_get_tpr(), 7);
+        raise_tpr(8);
+        assert_eq!(raw_get_tpr(), 8);
+        lower_tpr(8);
+        assert_eq!(raw_get_tpr(), 7);
+        lower_tpr(7);
+        assert_eq!(raw_get_tpr(), 0);
     }
+}
 
-    #[test]
-    #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
-    fn tpr_guard_test() {
-        if SVSM_PLATFORM.use_interrupts() {
-            assert_eq!(raw_get_tpr(), 0);
-            // Test in-order raise/lower.
-            let g1 = TprGuard::raise(8);
-            assert_eq!(raw_get_tpr(), 8);
-            let g2 = TprGuard::raise(9);
-            assert_eq!(raw_get_tpr(), 9);
-            drop(g2);
-            assert_eq!(raw_get_tpr(), 8);
-            drop(g1);
-            assert_eq!(raw_get_tpr(), 0);
-            // Test out-of-order raise/lower.
-            let g1 = TprGuard::raise(8);
-            assert_eq!(raw_get_tpr(), 8);
-            let g2 = TprGuard::raise(9);
-            assert_eq!(raw_get_tpr(), 9);
-            drop(g1);
-            assert_eq!(raw_get_tpr(), 9);
-            drop(g2);
-            assert_eq!(raw_get_tpr(), 0);
-        }
+pub fn tpr_guard_test() {
+    if SVSM_PLATFORM.use_interrupts() {
+        assert_eq!(raw_get_tpr(), 0);
+        // Test in-order raise/lower.
+        let g1 = TprGuard::raise(8);
+        assert_eq!(raw_get_tpr(), 8);
+        let g2 = TprGuard::raise(9);
+        assert_eq!(raw_get_tpr(), 9);
+        drop(g2);
+        assert_eq!(raw_get_tpr(), 8);
+        drop(g1);
+        assert_eq!(raw_get_tpr(), 0);
+        // Test out-of-order raise/lower.
+        let g1 = TprGuard::raise(8);
+        assert_eq!(raw_get_tpr(), 8);
+        let g2 = TprGuard::raise(9);
+        assert_eq!(raw_get_tpr(), 9);
+        drop(g1);
+        assert_eq!(raw_get_tpr(), 9);
+        drop(g2);
+        assert_eq!(raw_get_tpr(), 0);
     }
 }

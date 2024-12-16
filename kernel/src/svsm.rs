@@ -326,6 +326,9 @@ pub extern "C" fn svsm_main() {
         panic!("Failed to launch FW: {e:#?}");
     }
 
+    tpr_test();
+    tpr_guard_test();
+
     start_kernel_task(request_processing_main, String::from("request-processing"))
         .expect("Failed to launch request processing task");
 
