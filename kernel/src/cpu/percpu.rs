@@ -1375,11 +1375,13 @@ pub fn current_task() -> TaskPointer {
 
 #[no_mangle]
 pub extern "C" fn cpu_idle_loop() {
-    // Start request processing on this CPU.
-    start_kernel_task(request_processing_main, String::from("request-processing"))
-        .expect("Failed to launch request processing task");
-    start_kernel_task(request_loop_main, String::from("request-loop"))
-        .expect("Failed to launch request loop task");
+    // Start request processing on this CPU if required.
+    if SVSM_PLATFORM.start_svsm_request_loop() {
+        start_kernel_task(request_processing_main, String::from("request-processing"))
+            .expect("Failed to launch request processing task");
+        start_kernel_task(request_loop_main, String::from("request-loop"))
+            .expect("Failed to launch request loop task");
+    }
 
     loop {
         // Go idle
