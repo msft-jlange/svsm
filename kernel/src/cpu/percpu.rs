@@ -42,8 +42,8 @@ use crate::mm::{
     SVSM_PERCPU_VMSA_BASE, SVSM_SHADOW_STACKS_INIT_TASK, SVSM_SHADOW_STACK_ISST_DF_BASE,
     SVSM_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
 };
-use crate::platform::{SvsmPlatform, SVSM_PLATFORM};
-use crate::requests::{request_loop, request_processing_main};
+use crate::platform::{halt, SvsmPlatform, SVSM_PLATFORM};
+use crate::requests::{request_loop_main, request_processing_main};
 use crate::sev::ghcb::{GhcbPage, GHCB};
 use crate::sev::hv_doorbell::{allocate_hv_doorbell_page, HVDoorbell};
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
@@ -1378,7 +1378,22 @@ pub extern "C" fn cpu_idle_loop() {
     // Start request processing on this CPU.
     start_kernel_task(request_processing_main, String::from("request-processing"))
         .expect("Failed to launch request processing task");
-    request_loop();
+    start_kernel_task(request_loop_main, String::from("request-loop"))
+        .expect("Failed to launch request loop task");
 
-    panic!("Road ends here");
+    loop {
+        // Go idle
+        halt();
+
+        // If idle was explicitly requested by another task, then schedule that
+        // task to execute again in case it wants to perform processing as a
+        // result of the wake from idle.
+        let maybe_task = this_cpu().runqueue().lock_write().wake_from_idle();
+        if let Some(task) = maybe_task {
+            schedule_task(task);
+        }
+
+        // Execute any tasks that are currently runnable.
+        schedule();
+    }
 }
