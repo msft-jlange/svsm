@@ -368,7 +368,7 @@ unsafe fn switch_to(prev: *const Task, next: *const Task) {
     // the page table and stack information in those tasks are correct and
     // can be used to switch to the correct page table and execution stack.
     unsafe {
-        let cr3 = (*next).page_table.lock().cr3_value().bits() as u64;
+        let cr3 = (*next).cr3_value();
 
         // The location of a cpu-local stack that's mapped into every set of
         // page tables for use during context switches.
@@ -388,7 +388,7 @@ unsafe fn switch_to(prev: *const Task, next: *const Task) {
             in("r12") prev as u64,
             in("r13") next as u64,
             in("r14") tos_cs,
-            in("r15") cr3,
+            in("r15") u64::from(cr3),
             options(att_syntax));
     }
 }
@@ -437,7 +437,7 @@ pub fn schedule() {
 
         if next.update_cpu(apic_id) != apic_id {
             // Task has changed CPU, update per-cpu mappings
-            let mut pt = next.page_table.lock();
+            let mut pt = next.locked_page_table();
             this_cpu().populate_page_table(&mut pt);
         }
 

@@ -14,7 +14,7 @@ use core::mem::size_of;
 use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::address::{Address, VirtAddr};
+use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::idt::svsm::return_new_task;
 use crate::cpu::irq_state::EFLAGS_IF;
 use crate::cpu::percpu::{current_task, PerCpu};
@@ -23,7 +23,7 @@ use crate::cpu::sse::{get_xsave_area_size, sse_restore_context};
 use crate::cpu::{irqs_enable, X86ExceptionContext, X86GeneralRegs};
 use crate::error::SvsmError;
 use crate::fs::{opendir, stdout_open, Directory, FileHandle};
-use crate::locking::{RWLock, SpinLock};
+use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::vm::{
     Mapping, ShadowStackInit, VMFileMappingFlags, VMKernelShadowStack, VMKernelStack, VMR,
@@ -156,10 +156,25 @@ impl TaskSchedState {
     }
 }
 
+pub struct TaskKernelEnv {
+    /// Page table that is loaded when the task is scheduled
+    page_table: SpinLock<PageBox<PageTable>>,
+
+    /// Virtual address region that has been allocated for this task.
+    /// This is not referenced but must be stored so that it is dropped when
+    /// the Task is dropped.
+    _ktask_region: TaskVirtualRegionGuard,
+
+    /// Task virtual memory range for use at CPL 0
+    vm_range: VMR,
+}
+
 pub struct Task {
     pub rsp: u64,
 
     pub ssp: VirtAddr,
+
+    pub cr3: PhysAddr,
 
     /// XSave area
     pub xsa: PageBox<[u8]>,
@@ -168,16 +183,8 @@ pub struct Task {
 
     pub exception_shadow_stack: VirtAddr,
 
-    /// Page table that is loaded when the task is scheduled
-    pub page_table: SpinLock<PageBox<PageTable>>,
-
-    /// Virtual address region that has been allocated for this task.
-    /// This is not referenced but must be stored so that it is dropped when
-    /// the Task is dropped.
-    _ktask_region: TaskVirtualRegionGuard,
-
-    /// Task virtual memory range for use at CPL 0
-    vm_kernel_range: VMR,
+    /// Task-specific kernel environment for this task.
+    kernel_env: Option<TaskKernelEnv>,
 
     /// Task virtual memory range for use at CPL 3 - None for kernel tasks
     vm_user_range: Option<VMR>,
@@ -255,6 +262,7 @@ impl Task {
         let mut pgtable = cpu.get_pgtable().clone_shared()?;
 
         cpu.populate_page_table(&mut pgtable);
+        let cr3_value = pgtable.cr3_value();
 
         let ktask_region = TaskVirtualRegionGuard::alloc()?;
         let vaddr_region = ktask_region.vaddr_region();
@@ -324,6 +332,12 @@ impl Task {
         // Stack frames should be 16b-aligned
         debug_assert!(bounds.end().is_aligned(16));
 
+        let kernel_env = TaskKernelEnv {
+            page_table: SpinLock::new(pgtable),
+            _ktask_region: ktask_region,
+            vm_range: vm_kernel_range,
+        };
+
         Ok(Arc::new(Task {
             rsp: bounds
                 .end()
@@ -331,12 +345,11 @@ impl Task {
                 .expect("Invalid stack offset from task stack allocator")
                 .bits() as u64,
             ssp: shadow_stack_offset,
+            cr3: cr3_value,
             xsa,
             stack_bounds: bounds,
             exception_shadow_stack,
-            page_table: SpinLock::new(pgtable),
-            _ktask_region: ktask_region,
-            vm_kernel_range,
+            kernel_env: Some(kernel_env),
             vm_user_range: args.vm_user_range,
             sched_state: RWLock::new(TaskSchedState {
                 idle_task: false,
@@ -399,6 +412,14 @@ impl Task {
         self.id
     }
 
+    pub fn cr3_value(&self) -> PhysAddr {
+        self.cr3
+    }
+
+    pub fn locked_page_table(&self) -> LockGuard<'_, PageBox<PageTable>> {
+        self.kernel_env.as_ref().unwrap().page_table.lock()
+    }
+
     pub fn rootdir(&self) -> Arc<dyn Directory> {
         self.rootdir.clone()
     }
@@ -445,19 +466,21 @@ impl Task {
     }
 
     pub fn handle_pf(&self, vaddr: VirtAddr, write: bool) -> Result<(), SvsmError> {
-        self.vm_kernel_range.handle_page_fault(vaddr, write)
+        match &self.kernel_env {
+            Some(env) => env.vm_range.handle_page_fault(vaddr, write),
+            None => Err(SvsmError::Mem),
+        }
     }
 
     pub fn fault(&self, vaddr: VirtAddr, write: bool) -> Result<(), SvsmError> {
         if vaddr >= USER_MEM_START && vaddr < USER_MEM_END && self.vm_user_range.is_some() {
             let vmr = self.vm_user_range.as_ref().unwrap();
-            let mut pgtbl = self.page_table.lock();
+            let mut pgtbl = self.kernel_env.as_ref().unwrap().page_table.lock();
             vmr.populate_addr(&mut pgtbl, vaddr);
             vmr.handle_page_fault(vaddr, write)?;
-            Ok(())
-        } else {
-            Err(SvsmError::Mem)
+            return Ok(());
         }
+        Err(SvsmError::Mem)
     }
 
     fn allocate_stack_common() -> Result<(Arc<Mapping>, MemoryRegion<VirtAddr>), SvsmError> {
@@ -623,7 +646,10 @@ impl Task {
         size: usize,
         flags: VMFileMappingFlags,
     ) -> Result<VirtAddr, SvsmError> {
-        Self::mmap_common(&self.vm_kernel_range, addr, file, offset, size, flags)
+        match &self.kernel_env {
+            Some(env) => Self::mmap_common(&env.vm_range, addr, file, offset, size, flags),
+            None => Err(SvsmError::Mem),
+        }
     }
 
     pub fn mmap_kernel_guard<'a>(
@@ -634,8 +660,13 @@ impl Task {
         size: usize,
         flags: VMFileMappingFlags,
     ) -> Result<VMMappingGuard<'a>, SvsmError> {
-        let vaddr = Self::mmap_common(&self.vm_kernel_range, addr, file, offset, size, flags)?;
-        Ok(VMMappingGuard::new(&self.vm_kernel_range, vaddr))
+        match &self.kernel_env {
+            Some(env) => {
+                let vaddr = Self::mmap_common(&env.vm_range, addr, file, offset, size, flags)?;
+                Ok(VMMappingGuard::new(&env.vm_range, vaddr))
+            }
+            None => Err(SvsmError::Mem),
+        }
     }
 
     pub fn mmap_user(
@@ -656,17 +687,17 @@ impl Task {
     }
 
     pub fn munmap_kernel(&self, addr: VirtAddr) -> Result<(), SvsmError> {
-        self.vm_kernel_range.remove(addr)?;
-        Ok(())
+        match &self.kernel_env {
+            Some(env) => env.vm_range.remove(addr).and(Ok(())),
+            None => Err(SvsmError::Mem),
+        }
     }
 
     pub fn munmap_user(&self, addr: VirtAddr) -> Result<(), SvsmError> {
-        if self.vm_user_range.is_none() {
-            return Err(SvsmError::Mem);
+        match &self.vm_user_range {
+            Some(vmr) => vmr.remove(addr).and(Ok(())),
+            None => Err(SvsmError::Mem),
         }
-
-        self.vm_user_range.as_ref().unwrap().remove(addr)?;
-        Ok(())
     }
 
     /// Adds an object to the current task.
