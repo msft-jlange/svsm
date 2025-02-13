@@ -483,13 +483,6 @@ extern "C" fn free_init_stack() {
 }
 
 global_asm!(
-    // Make the value of the `shadow-stacks` feature usable in assembly.
-    ".set const_false, 0",
-    ".set const_true, 1",
-    concat!(
-        ".set CFG_SHADOW_STACKS, const_",
-        cfg!(feature = "shadow-stacks")
-    ),
     r#"
         .text
 
@@ -523,7 +516,6 @@ global_asm!(
         // Switch to a stack pointer that's valid in both the old and new page tables.
         mov     %r14, %rsp
 
-        .if CFG_SHADOW_STACKS
         cmpb    $0, {IS_CET_SUPPORTED}(%rip)
         je      1f
         // Save the current shadow stack pointer
@@ -535,7 +527,6 @@ global_asm!(
         mov     ${CONTEXT_SWITCH_RESTORE_TOKEN}, %rax
         rstorssp (%rax)
         saveprevssp
-        .endif
 
     1:
         // Switch to the new task state
@@ -543,7 +534,6 @@ global_asm!(
         // Switch to the new task page tables
         mov     %r15, %cr3
 
-        .if CFG_SHADOW_STACKS
         cmpb    $0, {IS_CET_SUPPORTED}(%rip)
         je      2f
         // Switch to the new task shadow stack and move the "shadow stack
@@ -552,7 +542,6 @@ global_asm!(
         rstorssp (%rdx)
         saveprevssp
     2:
-        .endif
 
         // Switch to the new task stack
         movq    {TASK_RSP_OFFSET}(%r13), %rsp
