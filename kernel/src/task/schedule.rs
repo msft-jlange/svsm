@@ -32,7 +32,7 @@ extern crate alloc;
 
 use super::INITIAL_TASK_ID;
 use super::{Task, TaskListAdapter, TaskPointer, TaskRunListAdapter};
-use crate::address::{Address, VirtAddr};
+use crate::address::VirtAddr;
 use crate::cpu::irq_state::raw_get_tpr;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::{irq_nesting_count, this_cpu};
@@ -446,21 +446,29 @@ pub fn schedule() {
             this_cpu().set_tss_rsp0(next.stack_bounds.end());
         }
         if is_cet_ss_supported() {
-            write_msr(PL0_SSP, next.exception_shadow_stack.bits() as u64);
+            if let Some(ssp) = next.exception_ssp() {
+                write_msr(PL0_SSP, ssp);
+            }
         }
 
         // Get task-pointers, consuming the Arcs and release their reference
         unsafe {
+            let maybe_xsa = current.get_xsa();
             let a = task_pointer(current);
             let b = task_pointer(next);
-            sse_save_context(u64::from((*a).xsa.vaddr()));
+
+            if let Some(xsa) = maybe_xsa {
+                sse_save_context(xsa);
+            }
 
             // Switch tasks
             switch_to(a, b);
 
             // We're now in the context of task pointed to by 'a'
             // which was previously scheduled out.
-            sse_restore_context(u64::from((*a).xsa.vaddr()));
+            if let Some(xsa) = maybe_xsa {
+                sse_restore_context(xsa);
+            }
         }
     }
 

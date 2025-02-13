@@ -22,7 +22,7 @@ use crate::cpu::shadow_stack::is_cet_ss_supported;
 use crate::cpu::sse::{get_xsave_area_size, sse_restore_context};
 use crate::cpu::{irqs_enable, X86ExceptionContext, X86GeneralRegs};
 use crate::error::SvsmError;
-use crate::fs::{opendir, stdout_open, Directory, FileHandle};
+use crate::fs::{stdout_open, Directory, FileHandle};
 use crate::locking::{LockGuard, RWLock, SpinLock};
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
 use crate::mm::vm::{
@@ -169,6 +169,20 @@ pub struct TaskKernelEnv {
     vm_range: VMR,
 }
 
+pub struct TaskUserEnv {
+    /// Shadow stack that is used during user/kernel transitions.
+    pub exception_shadow_stack: VirtAddr,
+
+    /// XSave area
+    pub xsa: PageBox<[u8]>,
+
+    /// Task virtual memory range for use at CPL 3 - None for kernel tasks
+    vm_range: VMR,
+
+    /// Root directory for this task
+    rootdir: Arc<dyn Directory>,
+}
+
 pub struct Task {
     pub rsp: u64,
 
@@ -176,18 +190,13 @@ pub struct Task {
 
     pub cr3: PhysAddr,
 
-    /// XSave area
-    pub xsa: PageBox<[u8]>,
-
     pub stack_bounds: MemoryRegion<VirtAddr>,
-
-    pub exception_shadow_stack: VirtAddr,
 
     /// Task-specific kernel environment for this task.
     kernel_env: Option<TaskKernelEnv>,
 
-    /// Task virtual memory range for use at CPL 3 - None for kernel tasks
-    vm_user_range: Option<VMR>,
+    /// Task-specific user environment for this task, if this is a user task.
+    user_env: Option<TaskUserEnv>,
 
     /// State relevant for scheduler
     sched_state: RWLock<TaskSchedState>,
@@ -197,9 +206,6 @@ pub struct Task {
 
     /// ID of the task
     id: u32,
-
-    /// Root directory for this task
-    rootdir: Arc<dyn Directory>,
 
     /// Link to global task list
     list_link: LinkedListAtomicLink,
@@ -254,7 +260,7 @@ struct CreateTaskArguments {
     vm_user_range: Option<VMR>,
 
     // The root directory that will be associated with this task.
-    rootdir: Arc<dyn Directory>,
+    rootdir: Option<Arc<dyn Directory>>,
 }
 
 impl Task {
@@ -338,6 +344,16 @@ impl Task {
             vm_range: vm_kernel_range,
         };
 
+        let user_env = match args.vm_user_range {
+            Some(vm_range) => Some(TaskUserEnv {
+                exception_shadow_stack,
+                xsa,
+                vm_range,
+                rootdir: args.rootdir.unwrap(),
+            }),
+            None => None,
+        };
+
         Ok(Arc::new(Task {
             rsp: bounds
                 .end()
@@ -346,11 +362,9 @@ impl Task {
                 .bits() as u64,
             ssp: shadow_stack_offset,
             cr3: cr3_value,
-            xsa,
             stack_bounds: bounds,
-            exception_shadow_stack,
             kernel_env: Some(kernel_env),
-            vm_user_range: args.vm_user_range,
+            user_env,
             sched_state: RWLock::new(TaskSchedState {
                 idle_task: false,
                 state: TaskState::RUNNING,
@@ -358,7 +372,6 @@ impl Task {
             }),
             name: args.name,
             id: TASK_ID_ALLOCATOR.next_id(),
-            rootdir: args.rootdir,
             list_link: LinkedListAtomicLink::default(),
             runlist_link: LinkedListAtomicLink::default(),
             objs: Arc::new(RWLock::new(BTreeMap::new())),
@@ -374,7 +387,7 @@ impl Task {
             entry: entry as usize,
             name,
             vm_user_range: None,
-            rootdir: opendir("/")?,
+            rootdir: None,
         };
         Self::create_common(cpu, create_args)
     }
@@ -395,7 +408,7 @@ impl Task {
             entry: user_entry,
             name,
             vm_user_range: Some(vm_user_range),
-            rootdir: root,
+            rootdir: Some(root),
         };
         Self::create_common(cpu, create_args)
     }
@@ -420,8 +433,20 @@ impl Task {
         self.kernel_env.as_ref().unwrap().page_table.lock()
     }
 
+    pub fn exception_ssp(&self) -> Option<u64> {
+        self.user_env
+            .as_ref()
+            .and_then(|env| Some(u64::from(env.exception_shadow_stack)))
+    }
+
+    pub fn get_xsa(&self) -> Option<u64> {
+        self.user_env
+            .as_ref()
+            .and_then(|env| Some(u64::from(env.xsa.vaddr())))
+    }
+
     pub fn rootdir(&self) -> Arc<dyn Directory> {
-        self.rootdir.clone()
+        self.user_env.as_ref().unwrap().rootdir.clone()
     }
 
     pub fn set_task_running(&self) {
@@ -473,12 +498,14 @@ impl Task {
     }
 
     pub fn fault(&self, vaddr: VirtAddr, write: bool) -> Result<(), SvsmError> {
-        if vaddr >= USER_MEM_START && vaddr < USER_MEM_END && self.vm_user_range.is_some() {
-            let vmr = self.vm_user_range.as_ref().unwrap();
-            let mut pgtbl = self.kernel_env.as_ref().unwrap().page_table.lock();
-            vmr.populate_addr(&mut pgtbl, vaddr);
-            vmr.handle_page_fault(vaddr, write)?;
-            return Ok(());
+        if vaddr >= USER_MEM_START && vaddr < USER_MEM_END {
+            if let Some(env) = &self.user_env {
+                let vmr = &env.vm_range;
+                let mut pgtbl = self.kernel_env.as_ref().unwrap().page_table.lock();
+                vmr.populate_addr(&mut pgtbl, vaddr);
+                vmr.handle_page_fault(vaddr, write)?;
+                return Ok(());
+            }
         }
         Err(SvsmError::Mem)
     }
@@ -677,13 +704,10 @@ impl Task {
         size: usize,
         flags: VMFileMappingFlags,
     ) -> Result<VirtAddr, SvsmError> {
-        if self.vm_user_range.is_none() {
-            return Err(SvsmError::Mem);
+        match &self.user_env {
+            Some(env) => Self::mmap_common(&env.vm_range, addr, file, offset, size, flags),
+            None => Err(SvsmError::Mem),
         }
-
-        let vmr = self.vm_user_range.as_ref().unwrap();
-
-        Self::mmap_common(vmr, addr, file, offset, size, flags)
     }
 
     pub fn munmap_kernel(&self, addr: VirtAddr) -> Result<(), SvsmError> {
@@ -694,8 +718,8 @@ impl Task {
     }
 
     pub fn munmap_user(&self, addr: VirtAddr) -> Result<(), SvsmError> {
-        match &self.vm_user_range {
-            Some(vmr) => vmr.remove(addr).and(Ok(())),
+        match &self.user_env {
+            Some(env) => env.vm_range.remove(addr).and(Ok(())),
             None => Err(SvsmError::Mem),
         }
     }
