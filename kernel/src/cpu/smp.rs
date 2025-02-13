@@ -15,7 +15,6 @@ use crate::enable_shadow_stacks;
 use crate::error::SvsmError;
 use crate::hyperv;
 use crate::platform::{SvsmPlatform, SVSM_PLATFORM};
-use crate::task::schedule_init;
 
 use bootlib::kernel_launch::ApStartContext;
 use core::arch::global_asm;
@@ -134,10 +133,6 @@ extern "C" fn start_ap() -> ! {
         .setup_on_cpu(&**SVSM_PLATFORM)
         .expect("setup_on_cpu() failed");
 
-    percpu
-        .setup_idle_task(cpu_idle_loop)
-        .expect("Failed to allocate idle task for AP");
-
     // Send a life-sign
     log::info!("AP with APIC-ID {} is online", this_cpu().get_apic_id());
 
@@ -147,10 +142,10 @@ extern "C" fn start_ap() -> ! {
     sse_init();
 
     // SAFETY: there is no current task running on this processor yet, so
-    // initializing the scheduler is safe.
+    // creating the idle task and initializing the scheduler are safe.
     unsafe {
-        schedule_init();
+        percpu.create_idle_task();
     }
 
-    unreachable!("Road ends here!");
+    cpu_idle_loop();
 }

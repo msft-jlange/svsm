@@ -23,7 +23,7 @@ use crate::cpu::idt::common::INT_INJ_VECTOR;
 use crate::cpu::tss::TSS_LIMIT;
 use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa};
 use crate::cpu::vmsa::{svsm_code_segment, svsm_data_segment, svsm_gdt_segment, svsm_idt_segment};
-use crate::cpu::{IrqState, LocalApic};
+use crate::cpu::{IrqGuard, IrqState, LocalApic};
 use crate::error::{ApicError, SvsmError};
 use crate::hyperv;
 use crate::hyperv::HypercallPagesGuard;
@@ -886,10 +886,27 @@ impl PerCpu {
         platform.setup_percpu_current(self)
     }
 
-    pub fn setup_idle_task(&self, entry: extern "C" fn()) -> Result<(), SvsmError> {
-        let idle_task = Task::create(self, entry, String::from("idle"))?;
+    // SAFETY: this can only be called if there is no task currently executing
+    // on the CPU.
+    pub unsafe fn create_idle_task(&self) {
+        // SAFETY: the caller guarantees that the current execution environment
+        // can safely be consumed into the idle task.
+        let idle_task = unsafe { Task::create_idle_task(self) };
         self.runqueue.lock_read().set_idle_task(idle_task);
-        Ok(())
+
+        // If the platform permits the use of interrupts, then ensure that
+        // interrupts will be enabled on the current CPU when leaving the
+        // scheduler environment.  This is done after disabling interrupts
+        // for scheduler initialization so that the first interrupt that can
+        // be received will always observe that there is a current task and
+        // not the boot thread.
+        if SVSM_PLATFORM.use_interrupts() {
+            let guard = IrqGuard::new();
+            self.irq_state.set_restore_state(true);
+            drop(guard);
+        }
+        let task = self.runqueue.lock_write().schedule_init();
+        self.current_stack.set(task.stack_bounds());
     }
 
     pub fn load_gdt_tss(&self, init_gdt: bool) {
@@ -1156,21 +1173,6 @@ impl PerCpu {
         self.vm_range.handle_page_fault(vaddr, write)
     }
 
-    pub fn schedule_init(&self) -> TaskPointer {
-        // If the platform permits the use of interrupts, then ensure that
-        // interrupts will be enabled on the current CPU when leaving the
-        // scheduler environment.  This is done after disabling interrupts
-        // for scheduler initialization so that the first interrupt that can
-        // be received will always observe that there is a current task and
-        // not the boot thread.
-        if SVSM_PLATFORM.use_interrupts() {
-            self.irq_state.set_restore_state(true);
-        }
-        let task = self.runqueue.lock_write().schedule_init();
-        self.current_stack.set(task.stack_bounds());
-        task
-    }
-
     pub fn schedule_prepare(&self) -> Option<(TaskPointer, TaskPointer)> {
         let ret = self.runqueue.lock_write().schedule_prepare();
         if let Some((_, ref next)) = ret {
@@ -1374,7 +1376,7 @@ pub fn current_task() -> TaskPointer {
 }
 
 #[no_mangle]
-pub extern "C" fn cpu_idle_loop() {
+pub fn cpu_idle_loop() -> ! {
     // Start request processing on this CPU if required.
     if SVSM_PLATFORM.start_svsm_request_loop() {
         start_kernel_task(request_processing_main, String::from("request-processing"))

@@ -15,6 +15,7 @@ use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::cpu::control_regs::read_cr3;
 use crate::cpu::idt::svsm::return_new_task;
 use crate::cpu::irq_state::EFLAGS_IF;
 use crate::cpu::percpu::{current_task, PerCpu};
@@ -411,6 +412,32 @@ impl Task {
             rootdir: Some(root),
         };
         Self::create_common(cpu, create_args)
+    }
+
+    // SAFETY: this function consumes the current CR3 value and thus the
+    // caller must guarantee that the current page tables will outlive this
+    // task.
+    pub unsafe fn create_idle_task(cpu: &PerCpu) -> TaskPointer {
+        Arc::new(Task {
+            // The stack pointers are populated at task switch time and need
+            // not be initialized here.
+            rsp: 0,
+            ssp: VirtAddr::new(0),
+            cr3: read_cr3(),
+            stack_bounds: cpu.get_current_stack(),
+            kernel_env: None,
+            user_env: None,
+            sched_state: RWLock::new(TaskSchedState {
+                idle_task: false,
+                state: TaskState::RUNNING,
+                cpu: cpu.get_apic_id(),
+            }),
+            name: String::from("idle"),
+            id: TASK_ID_ALLOCATOR.next_id(),
+            list_link: LinkedListAtomicLink::default(),
+            runlist_link: LinkedListAtomicLink::default(),
+            objs: Arc::new(RWLock::new(BTreeMap::new())),
+        })
     }
 
     pub fn stack_bounds(&self) -> MemoryRegion<VirtAddr> {

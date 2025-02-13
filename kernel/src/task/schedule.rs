@@ -49,7 +49,6 @@ use alloc::sync::Arc;
 use core::arch::{asm, global_asm};
 use core::cell::OnceCell;
 use core::mem::offset_of;
-use core::ptr::null_mut;
 use intrusive_collections::LinkedList;
 
 /// A RunQueue implementation that uses an RBTree to efficiently sort the priority
@@ -391,27 +390,6 @@ unsafe fn switch_to(prev: *const Task, next: *const Task) {
             in("r15") u64::from(cr3),
             options(att_syntax));
     }
-}
-
-/// Initializes the [RunQueue] on the current CPU. It will switch to the idle
-/// task and initialize the current_task field of the RunQueue. After this
-/// function has ran it is safe to call [`schedule()`] on the current CPU.
-///
-/// # Safety
-///
-/// This function can only be called when it is known that there is no current
-/// task.  Otherwise, the run state can become corrupted, and thus future
-/// calculation of task pointers can be incorrect.
-pub unsafe fn schedule_init() {
-    let guard = IrqGuard::new();
-    // SAFETY: The caller guarantees that there is no current task, and the
-    // pointer obtained for the next task will always be correct, thus
-    // providing a guarantee that the task switch will be safe.
-    unsafe {
-        let next = task_pointer(this_cpu().schedule_init());
-        switch_to(null_mut(), next);
-    }
-    drop(guard);
 }
 
 fn preemption_checks() {

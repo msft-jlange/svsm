@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), no_main)]
 
 use bootlib::kernel_launch::KernelLaunchInfo;
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
@@ -42,7 +42,6 @@ use svsm::platform::{init_platform_type, SvsmPlatformCell, SVSM_PLATFORM};
 use svsm::sev::secrets_page_mut;
 use svsm::svsm_paging::{init_page_table, invalidate_early_boot_memory};
 use svsm::task::exec_user;
-use svsm::task::schedule_init;
 use svsm::types::PAGE_SIZE;
 use svsm::utils::{immut_after_init::ImmutAfterInitCell, zero_mem_region};
 #[cfg(all(feature = "vtpm", not(test)))]
@@ -146,7 +145,7 @@ fn init_cpuid_table(addr: VirtAddr) {
 }
 
 #[no_mangle]
-extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) -> ! {
+extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) {
     let launch_info: KernelLaunchInfo = *li;
     init_platform_type(launch_info.platform_type);
 
@@ -225,28 +224,12 @@ extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) -> ! {
         .expect("Failed to run percpu.setup_on_cpu()");
     bsp_percpu.load();
 
-    if is_cet_ss_supported() {
-        enable_shadow_stacks!(bsp_percpu);
-    }
-
     initialize_fs();
-
-    // Idle task must be allocated after PerCPU data is mapped
-    bsp_percpu
-        .setup_idle_task(svsm_main)
-        .expect("Failed to allocate idle task for BSP");
 
     idt_init();
     platform
         .env_setup_late(debug_serial_port)
         .expect("Late environment setup failed");
-
-    dump_cpuid_table();
-
-    let mem_info = memory_info();
-    print_memory_info(&mem_info);
-
-    boot_stack_info();
 
     platform
         .configure_alternate_injection(launch_info.use_alternate_injection)
@@ -256,19 +239,33 @@ extern "C" fn svsm_start(li: &KernelLaunchInfo, vb_addr: usize) -> ! {
         .init(platform)
         .expect("Failed to initialize SVSM platform object");
 
-    sse_init();
-
-    // SAFETY: there is no current task running on this processor yet, so
-    // initializing the scheduler is safe.
+    // Continue executing on the per-CPU stack.
+    // SAFETY: the stack pointer was allocated with the CPU and can be used
+    // now.
     unsafe {
-        schedule_init();
+        asm!("movq {0}, %rsp",
+             "jmp svsm_main",
+             in(reg) u64::from(bsp_percpu.get_top_of_stack()),
+             options(att_syntax));
     }
-
-    unreachable!("SVSM entry point terminated unexpectedly");
 }
 
 #[no_mangle]
-pub extern "C" fn svsm_main() {
+pub extern "C" fn svsm_main() -> ! {
+    let bsp_percpu = this_cpu();
+    if is_cet_ss_supported() {
+        enable_shadow_stacks!(bsp_percpu);
+    }
+
+    dump_cpuid_table();
+
+    let mem_info = memory_info();
+    print_memory_info(&mem_info);
+
+    boot_stack_info();
+
+    sse_init();
+
     // If required, the GDB stub can be started earlier, just after the console
     // is initialised in svsm_start() above.
     gdbstub_start(&**SVSM_PLATFORM).expect("Could not start GDB stub");
@@ -279,6 +276,12 @@ pub extern "C" fn svsm_main() {
     SVSM_PLATFORM
         .env_setup_svsm()
         .expect("SVSM platform environment setup failed");
+
+    // SAFETY: no task is running yet, so the current execution context can
+    // become the idle task.
+    unsafe {
+        bsp_percpu.create_idle_task();
+    }
 
     let launch_info = &*LAUNCH_INFO;
     let config = if launch_info.igvm_params_virt_addr != 0 {
