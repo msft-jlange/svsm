@@ -388,11 +388,13 @@ global_asm!(
     r#"
         .set const_false, 0
         .set const_true, 1
+        .set cet_true, 0
+        .set cet_false, 1
     "#,
     concat!(".set CFG_NOSMAP, const_", cfg!(feature = "nosmap")),
     concat!(
-        ".set CFG_SHADOW_STACKS, const_",
-        cfg!(feature = "shadow-stacks")
+        ".set CFG_SHADOW_STACKS, cet_",
+        cfg!(feature = "nocet")
     ),
     include_str!("../x86/smap.S"),
     include_str!("entry.S"),

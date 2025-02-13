@@ -483,12 +483,12 @@ pub fn schedule_task(task: TaskPointer) {
 }
 
 global_asm!(
-    // Make the value of the `shadow-stacks` feature usable in assembly.
-    ".set const_false, 0",
-    ".set const_true, 1",
+    // Advertise the availability of CET to assembly.
+    ".set cet_true, 0",
+    ".set cet_false, 1",
     concat!(
-        ".set CFG_SHADOW_STACKS, const_",
-        cfg!(feature = "shadow-stacks")
+        ".set CFG_SHADOW_STACKS, cet_",
+        cfg!(feature = "nocet")
     ),
     r#"
         .text
