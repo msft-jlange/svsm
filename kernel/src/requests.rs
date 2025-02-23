@@ -146,8 +146,8 @@ fn check_requests() -> Result<bool, SvsmReqError> {
 
 #[no_mangle]
 pub extern "C" fn request_loop_main() {
-    let apic_id = this_cpu().get_apic_id();
-    log::info!("Launching request loop task on CPU {}", apic_id);
+    let cpu_index = this_cpu().get_cpu_index();
+    log::info!("Launching request loop task on CPU {}", cpu_index);
 
     loop {
         // Determine whether the guest is runnable.  If not, halt and wait for
@@ -237,9 +237,8 @@ pub extern "C" fn request_loop_main() {
 
 #[no_mangle]
 pub extern "C" fn request_processing_main() {
-    let apic_id = this_cpu().get_apic_id();
-
-    log::info!("Launching request-processing task on CPU {}", apic_id);
+    let cpu_index = this_cpu().get_cpu_index();
+    log::info!("Launching request-processing task on CPU {}", cpu_index);
 
     loop {
         wait_for_requests();

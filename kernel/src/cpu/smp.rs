@@ -23,9 +23,11 @@ use bootlib::kernel_launch::ApStartContext;
 use core::arch::global_asm;
 use core::mem;
 
-fn start_cpu(platform: &dyn SvsmPlatform, apic_id: u32) -> Result<(), SvsmError> {
+fn start_cpu(platform: &dyn SvsmPlatform, cpu_index: usize, apic_id: u32) -> Result<(), SvsmError> {
     let start_rip: u64 = (start_ap as *const u8) as u64;
     let percpu = PerCpu::alloc(apic_id)?;
+    assert!(percpu.get_cpu_index() == cpu_index);
+
     let pgtable = this_cpu().get_pgtable().clone_shared()?;
     percpu.setup(platform, pgtable)?;
 
@@ -38,20 +40,19 @@ fn start_cpu(platform: &dyn SvsmPlatform, apic_id: u32) -> Result<(), SvsmError>
 }
 
 pub fn start_secondary_cpus(platform: &dyn SvsmPlatform, cpus: &[ACPICPUInfo]) {
-    let mut count: usize = 0;
+    let mut cpu_index = 0;
     for c in cpus.iter().filter(|c| c.apic_id != 0 && c.enabled) {
-        log::info!("Launching AP with APIC-ID {}", c.apic_id);
-
         // If this is the first AP being started, then advise the TLB package
         // that future TLB flushes will have to be done with SMP scope.
-        if count == 0 {
+        if cpu_index == 0 {
             set_tlb_flush_smp();
         }
 
-        start_cpu(platform, c.apic_id).expect("Failed to bring CPU online");
-        count += 1;
+        cpu_index += 1;
+        log::info!("Launching AP {} with APIC-ID {}", cpu_index, c.apic_id);
+        start_cpu(platform, cpu_index, c.apic_id).expect("Failed to bring CPU online");
     }
-    log::info!("Brought {} AP(s) online", count);
+    log::info!("Brought {} AP(s) online", cpu_index);
 }
 
 #[no_mangle]
@@ -152,7 +153,7 @@ extern "C" fn start_ap() -> ! {
         .expect("Failed to allocate idle task for AP");
 
     // Send a life-sign
-    log::info!("AP with APIC-ID {} is online", this_cpu().get_apic_id());
+    log::info!("CPU {} is online", this_cpu().get_cpu_index());
 
     // Set CPU online so that BSP can proceed
     this_cpu_shared().set_online();
