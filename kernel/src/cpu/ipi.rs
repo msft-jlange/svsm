@@ -586,7 +586,7 @@ mod tests {
             Self {
                 value,
                 drop_count,
-                cpu_index: this_cpu().shared().cpu_index(),
+                cpu_index: this_cpu().get_cpu_index(),
             }
         }
     }
@@ -596,7 +596,7 @@ mod tests {
             // Drop must only be called on the CPU that created the message.
             // Otherwise, the drop count reference may point to the wrong
             // data.
-            assert_eq!(this_cpu().shared().cpu_index(), self.cpu_index);
+            assert_eq!(this_cpu().get_cpu_index(), self.cpu_index);
             *self.drop_count += 1;
         }
     }

@@ -317,15 +317,6 @@ pub extern "C" fn svsm_main() {
         .expect("Failed to unpack FS archive");
 
     let cpus = config.load_cpu_info().expect("Failed to load ACPI tables");
-    let mut nr_cpus = 0;
-
-    for cpu in cpus.iter() {
-        if cpu.enabled {
-            nr_cpus += 1;
-        }
-    }
-
-    log::info!("{} CPU(s) present", nr_cpus);
 
     start_secondary_cpus(&**SVSM_PLATFORM, &cpus);
 
@@ -370,7 +361,7 @@ fn panic(info: &PanicInfo<'_>) -> ! {
 
     log::error!(
         "Panic on CPU[{}]! COCONUT-SVSM Version: {}",
-        this_cpu().get_apic_id(),
+        this_cpu().get_cpu_index(),
         COCONUT_VERSION
     );
     log::error!("Info: {}", info);
