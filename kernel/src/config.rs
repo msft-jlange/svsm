@@ -8,7 +8,7 @@ extern crate alloc;
 
 use core::slice;
 
-use crate::acpi::tables::{load_acpi_cpu_info, ACPICPUInfo};
+use crate::acpi::tables::{load_fw_cpu_info, ACPICPUInfo};
 use crate::address::PhysAddr;
 use crate::error::SvsmError;
 use crate::fw_cfg::FwCfg;
@@ -97,7 +97,7 @@ impl SvsmConfig<'_> {
     }
     pub fn load_cpu_info(&self) -> Result<Vec<ACPICPUInfo>, SvsmError> {
         match self {
-            SvsmConfig::FirmwareConfig(fw_cfg) => load_acpi_cpu_info(fw_cfg),
+            SvsmConfig::FirmwareConfig(fw_cfg) => load_fw_cpu_info(fw_cfg),
             SvsmConfig::IgvmConfig(igvm_params) => igvm_params.load_cpu_info(),
         }
     }
