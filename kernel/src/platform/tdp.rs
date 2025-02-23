@@ -13,6 +13,7 @@ use crate::cpu::smp::create_ap_start_context;
 use crate::cpu::x86::apic::{apic_register_bit, APIC_MSR_ISR};
 use crate::error::SvsmError;
 use crate::hyperv;
+use crate::hyperv::{hyperv_start_cpu, is_hyperv_hypervisor};
 use crate::io::IOPort;
 use crate::mm::PerCPUPageMappingGuard;
 use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, SvsmPlatform};
@@ -52,11 +53,15 @@ unsafe fn wakeup_ap(mailbox: *mut TdMailbox, index: usize) {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct TdpPlatform {}
+pub struct TdpPlatform {
+    is_hyperv: bool,
+}
 
 impl TdpPlatform {
     pub fn new(_suppress_svsm_interrupts: bool) -> Self {
-        Self {}
+        Self {
+            is_hyperv: is_hyperv_hypervisor(),
+        }
     }
 }
 
@@ -222,6 +227,15 @@ impl SvsmPlatform for TdpPlatform {
         // therefore it's been initialized as a zero page.
         let context_pa = PhysAddr::new(SIPI_STUB_GPA as usize);
         let context_mapping = PerCPUPageMappingGuard::create_4k(context_pa)?;
+
+        // When running under Hyper-V, the target vCPU does not begin running
+        // until a start hypercall is issued, so make that hypercall now.
+        if self.is_hyperv {
+            // Do not expose the actual CPU context via the hypercall since it
+            // is not needed.  Use a default context instead.
+            let ctx = hyperv::HvInitialVpContext::default();
+            hyperv_start_cpu(cpu, &ctx)?;
+        }
 
         // SAFETY: the address of the mailbox page was made valid when the
         // `PerCPUPageMappingGuard` was created.
