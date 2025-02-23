@@ -272,7 +272,7 @@ pub static IS_HYPERV: ImmutAfterInitCell<bool> = ImmutAfterInitCell::uninit();
 
 fn is_hyperv_hypervisor() -> bool {
     // Get the hypervisor interface signature.
-    let cpuid_result = CpuidResult::get(0x40000001, 0);
+    let cpuid_result = SVSM_PLATFORM.cpuid(0x40000001).unwrap();
     cpuid_result.eax == 0x31237648
 }
 
