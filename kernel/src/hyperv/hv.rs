@@ -299,7 +299,7 @@ fn enable_vp_vtl_hypercall(
     let input_header = HvInputEnableVpVtl {
         partition_id: HV_PARTITION_ID_SELF,
         vtl,
-        vp_index: cpu.get_apic_id(),
+        vp_index: cpu.get_cpu_index().try_into().unwrap(),
         context: *context,
         ..Default::default()
     };
@@ -339,7 +339,7 @@ fn start_vp_hypercall(
     let input_header = HvInputStartVirtualProcessor {
         partition_id: HV_PARTITION_ID_SELF,
         vtl,
-        vp_index: cpu.get_apic_id(),
+        vp_index: cpu.get_cpu_index().try_into().unwrap(),
         context: *context,
         ..Default::default()
     };
