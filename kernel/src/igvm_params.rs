@@ -36,7 +36,7 @@ pub struct IgvmParams<'a> {
     igvm_param_block: &'a IgvmParamBlock,
     igvm_param_page: &'a IgvmParamPage,
     igvm_memory_map: &'a IgvmMemoryMap,
-    igvm_madt: &'a [u8],
+    igvm_madt: Option<&'a [u8]>,
     igvm_guest_context: Option<&'a IgvmGuestContext>,
 }
 
@@ -64,7 +64,7 @@ impl IgvmParams<'_> {
             igvm_param_block: param_block,
             igvm_param_page: param_page,
             igvm_memory_map: memory_map,
-            igvm_madt: madt,
+            igvm_madt: Some(madt),
             igvm_guest_context: guest_context,
         })
     }
@@ -257,8 +257,24 @@ impl IgvmParams<'_> {
     }
 
     pub fn load_cpu_info(&self) -> Result<Vec<ACPICPUInfo>, SvsmError> {
-        let madt = ACPITable::new(self.igvm_madt)?;
-        load_acpi_cpu_info(&madt)
+        match self.igvm_madt {
+            Some(madt_data) => {
+                let madt = ACPITable::new(madt_data)?;
+                load_acpi_cpu_info(&madt)
+            }
+            None => {
+                let mut cpus: Vec<ACPICPUInfo> = Vec::new();
+                log::info!("CPU count is {}", { self.igvm_param_page.cpu_count });
+                for i in 0..self.igvm_param_page.cpu_count {
+                    let cpu = ACPICPUInfo {
+                        apic_id: i,
+                        enabled: true,
+                    };
+                    cpus.push(cpu);
+                }
+                Ok(cpus)
+            }
+        }
     }
 
     pub fn should_launch_fw(&self) -> bool {
