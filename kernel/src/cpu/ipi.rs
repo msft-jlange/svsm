@@ -368,7 +368,7 @@ pub fn send_ipi(
         _ => {
             for cpu in PERCPU_AREAS.iter() {
                 ipi_board.pending.fetch_add(1, Ordering::Relaxed);
-                cpu.as_cpu_ref().ipi_from(sender_cpu_index);
+                cpu.ipi_from(sender_cpu_index);
             }
             send_interrupt = true;
 
