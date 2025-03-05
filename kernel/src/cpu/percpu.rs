@@ -48,7 +48,7 @@ use crate::sev::hv_doorbell::{allocate_hv_doorbell_page, HVDoorbell};
 use crate::sev::msr_protocol::{hypervisor_ghcb_features, GHCBHvFeatures};
 use crate::sev::utils::RMPFlags;
 use crate::sev::vmsa::{VMSAControl, VmsaPage};
-use crate::task::{schedule, schedule_task, RunQueue, Task, TaskPointer, WaitQueue};
+use crate::task::{schedule, schedule_task, RunQueue, Task, TaskPointer};
 use crate::types::{
     PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_ATTRIBUTES, SVSM_TSS,
 };
@@ -388,8 +388,6 @@ pub struct PerCpu {
     pub vrange_2m: RefCell<VirtualRange>,
     /// Task list that has been assigned for scheduling on this CPU
     runqueue: RWLockIrqSafe<RunQueue>,
-    /// WaitQueue for request processing
-    request_waitqueue: RefCell<WaitQueue>,
     /// Local APIC state for APIC emulation if enabled
     apic: RefCell<Option<LocalApic>>,
 
@@ -429,7 +427,6 @@ impl PerCpu {
             vrange_4k: RefCell::new(VirtualRange::new()),
             vrange_2m: RefCell::new(VirtualRange::new()),
             runqueue: RWLockIrqSafe::new(RunQueue::new()),
-            request_waitqueue: RefCell::new(WaitQueue::new()),
             apic: RefCell::new(None),
 
             shared,
@@ -1340,22 +1337,6 @@ impl PerCpuVmsas {
         }
 
         Ok(guard.swap_remove(index))
-    }
-}
-
-pub fn wait_for_requests() {
-    let current_task = current_task();
-    this_cpu()
-        .request_waitqueue
-        .borrow_mut()
-        .wait_for_event(current_task);
-    schedule();
-}
-
-pub fn process_requests() {
-    let maybe_task = this_cpu().request_waitqueue.borrow_mut().wakeup();
-    if let Some(task) = maybe_task {
-        schedule_task(task);
     }
 }
 
