@@ -94,6 +94,7 @@ impl From<GhcbError> for SvsmError {
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 enum GHCBExitCode {
     RDTSC = 0x6e,
+    CPUID = 0x72,
     IOIO = 0x7b,
     MSR = 0x7c,
     RDTSCP = 0x87,
@@ -279,6 +280,17 @@ impl GHCB {
 
     ghcb_getter!(get_usage_valid, usage, u32);
     ghcb_setter!(set_usage_valid, usage, u32);
+
+    pub fn cpuid(&self, regs: &mut X86GeneralRegs) -> Result<(), SvsmError> {
+        self.clear();
+        self.set_rcx_valid(regs.rcx as u64);
+        self.vmgexit(GHCBExitCode::CPUID, 0, 0)?;
+        regs.rax = self.get_rax_valid()? as usize;
+        regs.rbx = self.get_rbx_valid()? as usize;
+        regs.rcx = self.get_rcx_valid()? as usize;
+        regs.rdx = self.get_rdx_valid()? as usize;
+        Ok(())
+    }
 
     pub fn rdtscp_regs(&self, regs: &mut X86GeneralRegs) -> Result<(), SvsmError> {
         self.clear();
