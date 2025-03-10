@@ -196,6 +196,22 @@ impl SvsmPlatform for SnpPlatform {
         }
     }
 
+    /// # Safety
+    /// Hypercalls may have side-effects that affect the integrity of the
+    /// system, and the caller must take responsibility for ensuring that the
+    /// hypercall operation is safe.
+    unsafe fn hypercall(
+        &self,
+        input_control: hyperv::HvHypercallInput,
+        hypercall_pages: &hyperv::HypercallPagesGuard<'_>,
+    ) -> hyperv::HvHypercallOutput {
+        hyperv::execute_host_hypercall(input_control, hypercall_pages, |registers| {
+            current_ghcb()
+                .vmmcall(registers)
+                .expect("VMMCALL exit failed");
+        })
+    }
+
     fn cpuid(&self, eax: u32) -> Option<CpuidResult> {
         // If this is an architectural CPUID leaf, then extract the result
         // from the CPUID table.  Otherwise, request the value from the
@@ -205,6 +221,12 @@ impl SvsmPlatform for SnpPlatform {
         } else {
             cpuid_table(eax)
         }
+    }
+
+    unsafe fn write_host_msr(&self, msr: u32, value: u64) {
+        current_ghcb()
+            .wrmsr(msr, value)
+            .expect("Host MSR access failed");
     }
 
     fn setup_guest_host_comm(&mut self, cpu: &PerCpu, is_bsp: bool) {
