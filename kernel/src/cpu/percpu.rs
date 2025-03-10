@@ -26,7 +26,7 @@ use crate::cpu::vmsa::{svsm_code_segment, svsm_data_segment, svsm_gdt_segment, s
 use crate::cpu::{IrqState, LocalApic};
 use crate::error::{ApicError, SvsmError};
 use crate::hyperv;
-use crate::hyperv::HypercallPagesGuard;
+use crate::hyperv::{HypercallPagesGuard, IS_HYPERV};
 use crate::locking::{LockGuard, RWLock, RWLockIrqSafe, SpinLock};
 use crate::mm::alloc::allocate_pages;
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
@@ -861,6 +861,11 @@ impl PerCpu {
 
         // Complete platform-specific initialization.
         platform.setup_percpu(self)?;
+
+        // Allocate hypercall pages if running on Hyper-V.
+        if *IS_HYPERV {
+            self.allocate_hypercall_pages()?;
+        }
 
         Ok(())
     }

@@ -97,6 +97,10 @@ impl SvsmPlatform for SnpPlatform {
         SvsmPlatformType::Snp
     }
 
+    fn is_confidential_vm(&self) -> bool {
+        true
+    }
+
     fn env_setup(&mut self, _debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError> {
         sev_status_init();
         VTOM.init(vtom).map_err(|_| SvsmError::PlatformInit)?;
@@ -187,6 +191,12 @@ impl SvsmPlatform for SnpPlatform {
 
     fn cpuid(&self, eax: u32) -> Option<CpuidResult> {
         cpuid_table(eax)
+    }
+
+    unsafe fn write_host_msr(&self, msr: u32, value: u64) {
+        current_ghcb()
+            .wrmsr(msr, value)
+            .expect("Host MSR access failed");
     }
 
     fn setup_guest_host_comm(&mut self, cpu: &PerCpu, is_bsp: bool) {

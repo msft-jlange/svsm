@@ -75,6 +75,9 @@ pub trait SvsmPlatform {
         }
     }
 
+    /// Determine whether this is a confidential VM.
+    fn is_confidential_vm(&self) -> bool;
+
     /// Performs basic early initialization of the runtime environment.
     fn env_setup(&mut self, debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError>;
 
@@ -111,6 +114,12 @@ pub trait SvsmPlatform {
 
     /// Obtain CPUID using platform-specific tables.
     fn cpuid(&self, eax: u32) -> Option<CpuidResult>;
+
+    /// Write a host-owned MSR.
+    /// # Safety
+    /// The caller must ensure that the requested MSR modification does mot
+    /// affect memory safety.
+    unsafe fn write_host_msr(&self, msr: u32, value: u64);
 
     /// Establishes state required for guest/host communication.
     fn setup_guest_host_comm(&mut self, cpu: &PerCpu, is_bsp: bool);

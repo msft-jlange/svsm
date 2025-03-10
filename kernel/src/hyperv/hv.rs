@@ -16,6 +16,7 @@ use crate::hyperv::{HvInitialVpContext, HyperVMsr};
 use crate::mm::alloc::allocate_pages;
 use crate::mm::pagetable::PTEntryFlags;
 use crate::mm::{virt_to_phys, SVSM_HYPERCALL_CODE_PAGE};
+use crate::platform::{SvsmPlatform, SVSM_PLATFORM};
 use crate::types::PAGE_SIZE;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 use crate::utils::unsafe_copy_bytes;
@@ -264,41 +265,52 @@ pub const HV_VP_INDEX_SELF: u32 = 0xFFFF_FFFE;
 
 static HYPERV_HYPERCALL_CODE_PAGE: ImmutAfterInitCell<VirtAddr> = ImmutAfterInitCell::uninit();
 static CURRENT_VTL: ImmutAfterInitCell<u8> = ImmutAfterInitCell::uninit();
+pub static IS_HYPERV: ImmutAfterInitCell<bool> = ImmutAfterInitCell::uninit();
 
-pub fn is_hyperv_hypervisor() -> bool {
-    // Check if any hypervisor is present.
-    if (CpuidResult::get(1, 0).ecx & 0x80000000) == 0 {
-        return false;
+fn is_hyperv_hypervisor(platform: &dyn SvsmPlatform) -> bool {
+    // If this is a confidential VM, then there is no reason to check whether
+    // a hypervisor is present.
+    if !platform.is_confidential_vm() {
+        // Check if any hypervisor is present.
+        if (CpuidResult::get(1, 0).ecx & 0x80000000) == 0 {
+            return false;
+        }
     }
 
     // Get the hypervisor interface signature.
-    CpuidResult::get(0x40000001, 0).eax == 0x31237648
+    let cpuid_result = platform.cpuid(0x40000001).unwrap();
+    cpuid_result.eax == 0x31237648
 }
 
-pub fn hyperv_setup_hypercalls() -> Result<(), SvsmError> {
-    // Allocate a page to use as the hypercall code page.
-    let page = allocate_pages(1)?;
-
-    // Map the page as executable at a known address.
-    let hypercall_va = SVSM_HYPERCALL_CODE_PAGE;
-    this_cpu()
-        .get_pgtable()
-        .map_4k(hypercall_va, virt_to_phys(page), PTEntryFlags::exec())?;
-
-    HYPERV_HYPERCALL_CODE_PAGE
-        .init(hypercall_va)
-        .expect("Hypercall code page already allocated");
-
+fn hyperv_setup_hypercalls() -> Result<(), SvsmError> {
     // Set the guest OS ID.  The value is arbitrary.
-    // SAFETY: writing to HV Guest OS ID doesn't break safety.
-    unsafe { write_msr(HyperVMsr::GuestOSID.into(), 0xC0C0C0C0) };
+    // SAFETY: the guest OS MSR does not affect safety.
+    unsafe {
+        SVSM_PLATFORM.write_host_msr(HyperVMsr::GuestOSID.into(), 0xC0C0C0C0);
+    }
 
-    // Set the hypercall code page address to the physical address of the
-    // allocated page, and mark it enabled.
-    let pa = virt_to_phys(page);
-    // SAFETY: we trust the page allocator to allocate a valid page to which pa
-    // points.
-    unsafe { write_msr(HyperVMsr::Hypercall.into(), u64::from(pa) | 1) };
+    // Perform setup that is only required in non-confidential VMs.
+    if !SVSM_PLATFORM.is_confidential_vm() {
+        // Allocate a page to use as the hypercall code page.
+        let page = allocate_pages(1)?;
+
+        // Map the page as executable at a known address.
+        let hypercall_va = SVSM_HYPERCALL_CODE_PAGE;
+        this_cpu()
+            .get_pgtable()
+            .map_4k(hypercall_va, virt_to_phys(page), PTEntryFlags::exec())?;
+
+        HYPERV_HYPERCALL_CODE_PAGE
+            .init(hypercall_va)
+            .expect("Hypercall code page already allocated");
+
+        // Set the hypercall code page address to the physical address of the
+        // allocated page, and mark it enabled.
+        let pa = virt_to_phys(page);
+        // SAFETY: we trust the page allocator to allocate a valid page to which pa
+        // points.
+        unsafe { write_msr(HyperVMsr::Hypercall.into(), u64::from(pa) | 1) };
+    }
 
     // Obtain the current VTL for use in future hypercalls.
     let vsm_status_value = get_vp_register(hyperv::HvRegisterName::VsmVpStatus)?;
@@ -309,6 +321,22 @@ pub fn hyperv_setup_hypercalls() -> Result<(), SvsmError> {
         .expect("Current VTL already initialized");
 
     Ok(())
+}
+
+pub fn finish_hyperv_setup() -> Result<(), SvsmError> {
+    if *IS_HYPERV {
+        hyperv_setup_hypercalls()?;
+    }
+
+    Ok(())
+}
+
+pub fn detect_hyperv_support(platform: &dyn SvsmPlatform) {
+    unsafe{core::arch::asm!("int 30h")}
+    let is_hyperv = is_hyperv_hypervisor(platform);
+    IS_HYPERV
+        .init(is_hyperv)
+        .expect("Hyper-V support already initialized");
 }
 
 /// # Safety

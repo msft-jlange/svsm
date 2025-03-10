@@ -17,7 +17,7 @@ use crate::mm::PerCPUPageMappingGuard;
 use crate::platform::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, SvsmPlatform};
 use crate::tdx::tdcall::{
     td_accept_physical_memory, td_accept_virtual_memory, tdvmcall_halt, tdvmcall_io_read,
-    tdvmcall_io_write,
+    tdvmcall_io_write, tdvmcall_wrmsr,
 };
 use crate::tdx::TdxError;
 use crate::types::{PageSize, PAGE_SIZE};
@@ -69,6 +69,10 @@ impl SvsmPlatform for TdpPlatform {
         tdvmcall_halt();
     }
 
+    fn is_confidential_vm(&self) -> bool {
+        true
+    }
+
     fn env_setup(&mut self, debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError> {
         assert_ne!(vtom, 0);
         VTOM.init(vtom).map_err(|_| SvsmError::PlatformInit)?;
@@ -106,6 +110,10 @@ impl SvsmPlatform for TdpPlatform {
 
     fn cpuid(&self, eax: u32) -> Option<CpuidResult> {
         Some(CpuidResult::get(eax, 0))
+    }
+
+    unsafe fn write_host_msr(&self, msr: u32, value: u64) {
+        tdvmcall_wrmsr(msr, value);
     }
 
     fn setup_guest_host_comm(&mut self, _cpu: &PerCpu, _is_bsp: bool) {}
