@@ -10,13 +10,16 @@ extern crate alloc;
 
 use core::{mem::size_of, slice::from_raw_parts_mut};
 
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
     address::{Address, PhysAddr},
     mm::{valid_phys_address, GuestPtr, PerCPUPageMappingGuard},
     protocols::{errors::SvsmReqError, RequestParams},
+    task::{start_kernel_task, TaskPointer},
     types::PAGE_SIZE,
+    utils::immut_after_init::ImmutAfterInitCell,
     vtpm::{vtpm_get_locked, TcgTpmSimulatorInterface, VtpmProtocolInterface},
 };
 
@@ -258,10 +261,28 @@ fn vtpm_command_request(params: &RequestParams) -> Result<(), SvsmReqError> {
     Ok(())
 }
 
-pub fn vtpm_protocol_request(request: u32, params: &mut RequestParams) -> Result<(), SvsmReqError> {
+fn vtpm_protocol_request(request: u32, params: &mut RequestParams) -> Result<(), SvsmReqError> {
     match request {
         SVSM_VTPM_QUERY => vtpm_query_request(params),
         SVSM_VTPM_COMMAND => vtpm_command_request(params),
         _ => Err(SvsmReqError::unsupported_call()),
     }
+}
+
+extern "C" fn vtpm_task_main(_parameter: usize) {
+    log::info!("Starting vTPM task");
+
+    loop {
+        let (msg, requester) = wait_for_message();
+        let r = vtpm_protocol_request(msg.request, &msg.params);
+        reply_to_message(requester, r);
+    }
+}
+
+pub static VTPM_TASK: ImmutAfterInitCell<TaskPointer> = ImmutAfterInitCell::uninit();
+
+pub fn start_vtpm_task() {
+    let task = start_kernel_task(vtpm_task_main, 0, String::from("vTPM task"))
+        .expect("failed to start vTPM task");
+    let _ = VTPM_TASK.init(task).unwrap();
 }
