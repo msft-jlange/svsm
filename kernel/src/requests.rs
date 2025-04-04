@@ -18,7 +18,7 @@ use crate::sev::ghcb::switch_to_vmpl;
 use crate::task::{go_idle, set_affinity, start_kernel_task};
 
 #[cfg(all(feature = "vtpm", not(test)))]
-use crate::protocols::{vtpm::vtpm_protocol_request, SVSM_VTPM_PROTOCOL};
+use crate::protocols::{vtpm::start_vtpm_task, vtpm::VTPM_TASK, SVSM_VTPM_PROTOCOL};
 use crate::protocols::{RequestParams, SVSM_APIC_PROTOCOL, SVSM_CORE_PROTOCOL};
 use crate::sev::vmsa::VMSAControl;
 use crate::types::GUEST_VMPL;
@@ -119,7 +119,7 @@ fn request_loop_once(
     match protocol {
         SVSM_CORE_PROTOCOL => core_protocol_request(request, params).map(|_| true),
         #[cfg(all(feature = "vtpm", not(test)))]
-        SVSM_VTPM_PROTOCOL => vtpm_protocol_request(request, params).map(|_| true),
+        SVSM_VTPM_PROTOCOL => post_message(VTPM_TASK, (request, params)),
         SVSM_APIC_PROTOCOL => apic_protocol_request(request, params).map(|_| true),
         _ => Err(SvsmReqError::unsupported_protocol()),
     }
@@ -156,8 +156,13 @@ pub extern "C" fn request_loop_main(cpu_index: usize) {
         // Send this task to the correct CPU.
         set_affinity(cpu_index);
     } else {
-        // When starting the request loop on the BSP, start an additional
-        // request loop task for each other processor in the system.
+        // When starting the request loop on the BSP, start by launching a
+        // separate vTPM task.
+        #[cfg(all(feature = "vtpm", not(test)))]
+        start_vtpm_task();
+
+        // Start an additional request loop task for each other processor in
+        // the system.
         let cpu_count = PERCPU_AREAS.len();
         for task_index in 1..cpu_count {
             let loop_name = format!("request-loop on CPU {}", task_index);
@@ -299,8 +304,7 @@ fn process_request() {
         Err(SvsmReqError::FatalError(err)) => {
             panic!(
                 "Fatal error handling core protocol request {}: {:?}",
-                request_info.request,
-                err
+                request_info.request, err
             );
         }
     };
