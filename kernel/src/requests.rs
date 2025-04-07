@@ -299,8 +299,7 @@ fn process_request() {
         Err(SvsmReqError::FatalError(err)) => {
             panic!(
                 "Fatal error handling core protocol request {}: {:?}",
-                request_info.request,
-                err
+                request_info.request, err
             );
         }
     };
