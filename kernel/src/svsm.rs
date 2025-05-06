@@ -32,6 +32,7 @@ use svsm::debug::gdbstub::svsm_gdbstub::{debug_break, gdbstub_start};
 use svsm::debug::stacktrace::print_stack;
 use svsm::enable_shadow_stacks;
 use svsm::fs::{initialize_fs, opendir, populate_ram_fs};
+use svsm::guest_fw::prepare_guest_fw;
 use svsm::hyperv::hyperv_setup;
 use svsm::igvm_params::IgvmParams;
 use svsm::kernel_region::new_kernel_region;
@@ -42,7 +43,7 @@ use svsm::mm::virtualrange::virt_log_usage;
 use svsm::mm::{init_kernel_mapping_info, FixedAddressMappingRange};
 use svsm::platform;
 use svsm::platform::{init_capabilities, init_platform_type, SvsmPlatformCell, SVSM_PLATFORM};
-use svsm::requests::request_loop_main;
+use svsm::requests::{request_loop_main, GUEST_FW_INFO};
 use svsm::sev::secrets_page_mut;
 use svsm::svsm_paging::{init_page_table, invalidate_early_boot_memory};
 use svsm::task::schedule_init;
@@ -338,18 +339,16 @@ pub extern "C" fn svsm_main(cpu_index: usize) {
     invalidate_early_boot_memory(&**SVSM_PLATFORM, &config, launch_info)
         .expect("Failed to invalidate early boot memory");
 
-    if let Err(e) = SVSM_PLATFORM.prepare_fw(&config, new_kernel_region(&LAUNCH_INFO)) {
-        panic!("Failed to prepare guest FW: {e:#?}");
-    }
+    let guest_fw = prepare_guest_fw(&config, new_kernel_region(&LAUNCH_INFO))
+        .expect("Failed to prepare guest FW: {e:#?}");
+    GUEST_FW_INFO
+        .init(guest_fw)
+        .expect("Guest FW state already initialized");
 
     #[cfg(all(feature = "vtpm", not(test)))]
     vtpm_init().expect("vTPM failed to initialize");
 
     virt_log_usage();
-
-    if let Err(e) = SVSM_PLATFORM.launch_fw(&config) {
-        panic!("Failed to launch FW: {e:?}");
-    }
 
     #[cfg(test)]
     {

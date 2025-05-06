@@ -10,9 +10,6 @@ pub mod native;
 pub mod snp;
 pub mod tdp;
 
-mod snp_fw;
-pub use snp_fw::SevFWMetaData;
-
 use capabilities::Caps;
 use native::NativePlatform;
 use snp::SnpPlatform;
@@ -22,7 +19,6 @@ use core::arch::asm;
 use core::fmt::Debug;
 
 use crate::address::{PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::shadow_stack::determine_cet_support_from_cpuid;
@@ -90,20 +86,6 @@ pub trait SvsmPlatform: Sync {
     /// Performs initialiation of the environment specfic to the SVSM kernel
     /// (for services not used by stage2).
     fn env_setup_svsm(&self) -> Result<(), SvsmError>;
-
-    /// Performs the necessary preparations for launching guest boot firmware.
-    fn prepare_fw(
-        &self,
-        _config: &SvsmConfig<'_>,
-        _kernel_region: MemoryRegion<PhysAddr>,
-    ) -> Result<(), SvsmError> {
-        Ok(())
-    }
-
-    /// Launches guest boot firmware.
-    fn launch_fw(&self, _config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
-        Ok(())
-    }
 
     /// Completes initialization of a per-CPU object during construction.
     fn setup_percpu(&self, cpu: &PerCpu) -> Result<(), SvsmError>;

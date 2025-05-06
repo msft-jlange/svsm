@@ -10,6 +10,7 @@ use crate::address::{Address, PhysAddr};
 use crate::config::SvsmConfig;
 use crate::cpu::percpu::PERCPU_VMSAS;
 use crate::error::SvsmError;
+use crate::guest_fw::GuestFwInfo;
 use crate::locking::RWLock;
 use crate::types::PAGE_SIZE;
 use crate::utils::MemoryRegion;
@@ -92,9 +93,9 @@ pub fn init_memory_map(
     Ok(())
 }
 
-pub fn write_guest_memory_map(config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
+pub fn write_guest_memory_map(fw_info: &GuestFwInfo) -> Result<(), SvsmError> {
     // Supply the memory map to the guest if required by the configuration.
-    config.write_guest_memory_map(&MEMORY_MAP.lock_read())
+    fw_info.write_guest_memory_map(&MEMORY_MAP.lock_read())
 }
 
 /// Returns `true` if the provided physical address `paddr` is valid, i.e.

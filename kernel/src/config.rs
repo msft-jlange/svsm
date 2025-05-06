@@ -10,8 +10,9 @@ use crate::acpi::tables::{load_fw_cpu_info, ACPICPUInfo};
 use crate::address::PhysAddr;
 use crate::error::SvsmError;
 use crate::fw_cfg::FwCfg;
+use crate::guest_fw::GuestFwInfo;
 use crate::igvm_params::IgvmParams;
-use crate::platform::{SevFWMetaData, SvsmPlatform};
+use crate::platform::SvsmPlatform;
 use crate::utils::MemoryRegion;
 use alloc::vec::Vec;
 use cpuarch::vmsa::VMSA;
@@ -87,11 +88,11 @@ impl<'a> SvsmConfig<'a> {
     pub fn page_state_change_required(&self) -> bool {
         self.igvm_params.page_state_change_required()
     }
+    pub fn guest_mem_map_region(&self) -> Option<MemoryRegion<PhysAddr>> {
+        self.igvm_params.guest_mem_map_region()
+    }
     pub fn get_memory_regions(&self) -> Result<Vec<MemoryRegion<PhysAddr>>, SvsmError> {
         self.igvm_params.get_memory_regions()
-    }
-    pub fn write_guest_memory_map(&self, map: &[MemoryRegion<PhysAddr>]) -> Result<(), SvsmError> {
-        self.igvm_params.write_guest_memory_map(map)
     }
     pub fn reserved_kernel_area_size(&self) -> usize {
         self.igvm_params.reserved_kernel_area_size()
@@ -116,8 +117,8 @@ impl<'a> SvsmConfig<'a> {
         self.igvm_params.debug_serial_port()
     }
 
-    pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
-        self.igvm_params.get_fw_metadata()
+    pub fn get_fw_info(&self) -> Option<GuestFwInfo> {
+        self.igvm_params.get_fw_info()
     }
 
     pub fn get_fw_regions(

@@ -8,20 +8,25 @@ extern crate alloc;
 
 use crate::cpu::ipi::wait_for_ipi_block;
 use crate::cpu::percpu::{this_cpu, PERCPU_AREAS};
+use crate::fw_setup::setup_guest_fw;
+use crate::guest_fw::GuestFwInfo;
 use crate::protocols::apic::apic_protocol_request;
+use crate::protocols::attest::attest_protocol_request;
 use crate::protocols::core::core_protocol_request;
 use crate::protocols::errors::{SvsmReqError, SvsmResultCode};
 use crate::task::{go_idle, set_affinity, start_kernel_thread};
 use crate::vmm::{enter_guest, GuestExitMessage, GuestRegister};
 
-use crate::protocols::attest::attest_protocol_request;
 #[cfg(all(feature = "vtpm", not(test)))]
 use crate::protocols::{vtpm::vtpm_protocol_request, SVSM_VTPM_PROTOCOL};
 use crate::protocols::{
     RequestParams, SVSM_APIC_PROTOCOL, SVSM_ATTEST_PROTOCOL, SVSM_CORE_PROTOCOL,
 };
+use crate::utils::immut_after_init::ImmutAfterInitCell;
 
 use alloc::vec::Vec;
+
+pub static GUEST_FW_INFO: ImmutAfterInitCell<Option<GuestFwInfo>> = ImmutAfterInitCell::uninit();
 
 /// The SVSM Calling Area (CAA)
 #[repr(C, packed)]
@@ -94,6 +99,11 @@ pub extern "C" fn request_loop_main(cpu_index: usize) {
         // Send this task to the correct CPU.
         set_affinity(cpu_index);
     } else {
+        // Initialize guest firmware state.
+        if let Some(fw_info) = GUEST_FW_INFO.as_ref() {
+            setup_guest_fw(fw_info).expect("Failed to configure guest firmware");
+        }
+
         // When starting the request loop on the BSP, start an additional
         // request loop task for each other processor in the system.
         let cpu_count = PERCPU_AREAS.len();
