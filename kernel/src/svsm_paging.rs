@@ -105,7 +105,7 @@ fn invalidate_boot_memory_region(
     log::info!("Invalidating boot region {aligned_region:#018x}");
 
     if !aligned_region.is_empty() {
-        platform.validate_physical_page_range(aligned_region, PageValidateOp::Invalidate)?;
+        platform.validate_physical_page_range(aligned_region, PageValidateOp::Invalidate, false)?;
 
         if config.page_state_change_required() {
             platform.page_state_change(

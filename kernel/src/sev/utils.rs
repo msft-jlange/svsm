@@ -52,6 +52,27 @@ impl fmt::Display for SevSnpError {
     }
 }
 
+fn convert_size_mismatch_error(result: Result<(), SvsmError>) -> Result<bool, SvsmError> {
+    match result {
+        Ok(_) => Ok(false),
+        Err(err) => {
+            if let SvsmError::SevSnp(SevSnpError::FAIL_SIZEMISMATCH(_)) = err {
+                Ok(true)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+fn pvalidate_2m(addr: VirtAddr, valid: PvalidateOp) -> Result<bool, SvsmError> {
+    convert_size_mismatch_error(pvalidate(addr, PageSize::Huge, valid))
+}
+
+fn rmp_adjust_2m(addr: VirtAddr, flags: RMPFlags) -> Result<bool, SvsmError> {
+    convert_size_mismatch_error(rmp_adjust(addr, flags, PageSize::Huge))
+}
+
 fn pvalidate_range_4k(region: MemoryRegion<VirtAddr>, valid: PvalidateOp) -> Result<(), SvsmError> {
     for addr in region.iter_pages(PageSize::Regular) {
         pvalidate(addr, PageSize::Regular, valid)?;
@@ -60,9 +81,18 @@ fn pvalidate_range_4k(region: MemoryRegion<VirtAddr>, valid: PvalidateOp) -> Res
     Ok(())
 }
 
+fn rmp_adjust_range_4k(region: MemoryRegion<VirtAddr>, flags: RMPFlags) -> Result<(), SvsmError> {
+    for addr in region.iter_pages(PageSize::Regular) {
+        rmp_adjust(addr, flags, PageSize::Regular)?;
+    }
+
+    Ok(())
+}
+
 pub fn pvalidate_range(
     region: MemoryRegion<VirtAddr>,
     valid: PvalidateOp,
+    guest_visible: bool,
 ) -> Result<(), SvsmError> {
     let mut addr = region.start();
     let end = region.end();
@@ -74,17 +104,81 @@ pub fn pvalidate_range(
             && addr + PAGE_SIZE_2M <= end
             && virt_to_frame(addr).size() >= PAGE_SIZE_2M
         {
-            // Try to validate as a huge page.
-            // If we fail, try to fall back to regular-sized pages.
-            pvalidate(addr, PageSize::Huge, valid).or_else(|err| match err {
-                SvsmError::SevSnp(SevSnpError::FAIL_SIZEMISMATCH(_)) => {
-                    pvalidate_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), valid)
+            // If a page being invalidated was was previously guest-visible,
+            // then reset guest VMPL permissions now.  This is required because
+            // the next time the page is validated, it may be validated for
+            // private usage, and if the host hasn't reassigned the physical
+            // page, the VMPL permissions may be unchanged.  Therefore they
+            // must be set to default here.
+            let mut split = if guest_visible && valid == PvalidateOp::Invalid {
+                rmp_adjust_2m(addr, RMPFlags::GUEST_VMPL | RMPFlags::NONE)?
+            } else {
+                false
+            };
+
+            // Try to validate as a huge page unless the huge page operation
+            // above failed.
+            if !split && pvalidate_2m(addr, valid)? {
+                split = true;
+            }
+            if split {
+                pvalidate_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), valid)?;
+            }
+
+            // If a page being validated should be made guest-visible, then
+            // make it guest-visible now.
+            if guest_visible && valid == PvalidateOp::Valid {
+                let flags = RMPFlags::GUEST_VMPL | RMPFlags::RWX;
+                if !split && rmp_adjust_2m(addr, flags)? {
+                    split = true;
                 }
-                _ => Err(err),
-            })?;
+                if split {
+                    rmp_adjust_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), flags)?;
+                }
+            }
             addr = addr + PAGE_SIZE_2M;
         } else {
+            if guest_visible && valid == PvalidateOp::Invalid {
+                rmp_adjust(
+                    addr,
+                    RMPFlags::GUEST_VMPL | RMPFlags::NONE,
+                    PageSize::Regular,
+                )?;
+            }
             pvalidate(addr, PageSize::Regular, valid)?;
+            if guest_visible && valid == PvalidateOp::Valid {
+                rmp_adjust(
+                    addr,
+                    RMPFlags::GUEST_VMPL | RMPFlags::RWX,
+                    PageSize::Regular,
+                )?;
+            }
+            addr = addr + PAGE_SIZE;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn rmp_adjust_range(region: MemoryRegion<VirtAddr>, flags: RMPFlags) -> Result<(), SvsmError> {
+    let mut addr = region.start();
+    let end = region.end();
+
+    while addr < end {
+        // Operation on a 2 MB page can only be attempted if the underlying
+        // mapping is a 2 MB mapping.
+        if addr.is_aligned(PAGE_SIZE_2M)
+            && addr + PAGE_SIZE_2M <= end
+            && virt_to_frame(addr).size() >= PAGE_SIZE_2M
+        {
+            // Try to adjust as a huge page.  If this is not possible, adjust
+            // as a series of 4 KB pages.
+            if rmp_adjust_2m(addr, flags)? {
+                rmp_adjust_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), flags)?;
+            }
+            addr = addr + PAGE_SIZE_2M;
+        } else {
+            rmp_adjust(addr, flags, PageSize::Regular)?;
             addr = addr + PAGE_SIZE;
         }
     }
@@ -190,6 +284,7 @@ pub fn raw_vmgexit() {
 }
 
 bitflags::bitflags! {
+    #[derive(Copy, Clone)]
     pub struct RMPFlags: u64 {
         const VMPL0 = 0;
         const VMPL1 = 1;

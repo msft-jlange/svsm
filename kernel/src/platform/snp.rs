@@ -29,9 +29,11 @@ use crate::sev::msr_protocol::{
 };
 use crate::sev::status::vtom_enabled;
 use crate::sev::tlb::flush_tlb_scope;
+use crate::sev::RMPFlags;
 use crate::sev::GHCB_APIC_ACCESSOR;
 use crate::sev::{
-    init_hypervisor_ghcb_features, pvalidate_range, sev_status_init, sev_status_verify, PvalidateOp,
+    init_hypervisor_ghcb_features, pvalidate_range, rmp_adjust_range, sev_status_init,
+    sev_status_verify, PvalidateOp,
 };
 use crate::types::PageSize;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
@@ -49,7 +51,11 @@ static VTOM: ImmutAfterInitCell<usize> = ImmutAfterInitCell::uninit();
 
 static APIC_EMULATION_REG_COUNT: AtomicU32 = AtomicU32::new(0);
 
-fn pvalidate_page_range(range: MemoryRegion<PhysAddr>, op: PvalidateOp) -> Result<(), SvsmError> {
+fn pvalidate_page_range(
+    range: MemoryRegion<PhysAddr>,
+    op: PvalidateOp,
+    guest_visible: bool,
+) -> Result<(), SvsmError> {
     // In the future, it is likely that this function will need to be prepared
     // to execute both PVALIDATE and RMPADJUST over the same set of addresses,
     // so the loop is structured to anticipate that possibility.
@@ -63,7 +69,32 @@ fn pvalidate_page_range(range: MemoryRegion<PhysAddr>, op: PvalidateOp) -> Resul
             PAGE_SIZE
         };
         let mapping = PerCPUPageMappingGuard::create(paddr, paddr + len, 0)?;
-        pvalidate_range(MemoryRegion::new(mapping.virt_addr(), len), op)?;
+        pvalidate_range(
+            MemoryRegion::new(mapping.virt_addr(), len),
+            op,
+            guest_visible,
+        )?;
+        paddr = paddr + len;
+    }
+
+    Ok(())
+}
+
+fn rmp_adjust_page_range(range: MemoryRegion<PhysAddr>, flags: RMPFlags) -> Result<(), SvsmError> {
+    // In the future, it is likely that this function will need to be prepared
+    // to execute both PVALIDATE and RMPADJUST over the same set of addresses,
+    // so the loop is structured to anticipate that possibility.
+    let mut paddr = range.start();
+    let paddr_end = range.end();
+    while paddr < paddr_end {
+        // Check whether a 2 MB page can be attempted.
+        let len = if paddr.is_aligned(PAGE_SIZE_2M) && paddr + PAGE_SIZE_2M <= paddr_end {
+            PAGE_SIZE_2M
+        } else {
+            PAGE_SIZE
+        };
+        let mapping = PerCPUPageMappingGuard::create(paddr, paddr + len, 0)?;
+        rmp_adjust_range(MemoryRegion::new(mapping.virt_addr(), len), flags)?;
         paddr = paddr + len;
     }
 
@@ -272,8 +303,9 @@ impl SvsmPlatform for SnpPlatform {
         &self,
         region: MemoryRegion<PhysAddr>,
         op: PageValidateOp,
+        guest_visible: bool,
     ) -> Result<(), SvsmError> {
-        pvalidate_page_range(region, PvalidateOp::from(op))
+        pvalidate_page_range(region, PvalidateOp::from(op), guest_visible)
     }
 
     fn validate_virtual_page_range(
@@ -281,7 +313,17 @@ impl SvsmPlatform for SnpPlatform {
         region: MemoryRegion<VirtAddr>,
         op: PageValidateOp,
     ) -> Result<(), SvsmError> {
-        pvalidate_range(region, PvalidateOp::from(op))
+        pvalidate_range(region, PvalidateOp::from(op), false)
+    }
+
+    fn set_guest_page_access(&self, region: MemoryRegion<PhysAddr>, guest_visible: bool) {
+        let flags = RMPFlags::GUEST_VMPL
+            | if guest_visible {
+                RMPFlags::RWX
+            } else {
+                RMPFlags::NONE
+            };
+        rmp_adjust_page_range(region, flags).expect("RMP adjust guest access failed");
     }
 
     fn flush_tlb(&self, flush_scope: &TlbFlushScope) {
