@@ -12,10 +12,12 @@ use crate::acpi::tables::{load_fw_cpu_info, ACPICPUInfo};
 use crate::address::PhysAddr;
 use crate::error::SvsmError;
 use crate::fw_cfg::FwCfg;
+use crate::guest_fw::GuestFwInfo;
 use crate::igvm_params::IgvmParams;
 use crate::mm::{PerCPUPageMappingGuard, PAGE_SIZE, SIZE_1G};
-use crate::platform::{parse_fw_meta_data, SevFWMetaData, SvsmPlatform};
+use crate::platform::SvsmPlatform;
 use crate::serial::SERIAL_PORT;
+use crate::sev::fw_meta::parse_fw_meta_data;
 use crate::utils::MemoryRegion;
 use alloc::vec::Vec;
 use cpuarch::vmsa::VMSA;
@@ -147,7 +149,7 @@ impl<'a> SvsmConfig<'a> {
         }
     }
 
-    pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
+    pub fn get_fw_metadata(&self) -> Option<GuestFwInfo> {
         match &self.igvm_params {
             Some(igvm_params) => igvm_params.get_fw_metadata(),
             None => {

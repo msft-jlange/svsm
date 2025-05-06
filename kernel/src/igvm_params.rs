@@ -10,8 +10,9 @@ use crate::acpi::tables::{load_acpi_cpu_info, ACPICPUInfo, ACPITable};
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::cpu::efer::EFERFlags;
 use crate::error::SvsmError;
+use crate::guest_fw::GuestFwInfo;
 use crate::mm::{GuestPtr, PerCPUPageMappingGuard, PAGE_SIZE};
-use crate::platform::{PageStateChangeOp, PageValidateOp, SevFWMetaData, SVSM_PLATFORM};
+use crate::platform::{PageStateChangeOp, PageValidateOp, SVSM_PLATFORM};
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
 use alloc::vec::Vec;
@@ -281,12 +282,12 @@ impl IgvmParams<'_> {
         self.igvm_param_block.debug_serial_port
     }
 
-    pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
+    pub fn get_fw_metadata(&self) -> Option<GuestFwInfo> {
         if !self.should_launch_fw() {
             return None;
         }
 
-        let mut fw_meta = SevFWMetaData::new();
+        let mut fw_meta = GuestFwInfo::new();
 
         if self.igvm_param_block.firmware.caa_page != 0 {
             fw_meta.caa_page = Some(PhysAddr::new(
