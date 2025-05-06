@@ -170,7 +170,9 @@ impl SvsmPlatform for TdpPlatform {
         &self,
         region: MemoryRegion<PhysAddr>,
         op: PageValidateOp,
+        guest_visible: bool,
     ) -> Result<(), SvsmError> {
+        assert!(!guest_visible);
         if !region.start().is_aligned(PAGE_SIZE) || !is_aligned(region.len(), PAGE_SIZE) {
             return Err(SvsmError::InvalidAddress);
         }
@@ -204,6 +206,10 @@ impl SvsmPlatform for TdpPlatform {
             PageValidateOp::Validate => unsafe { td_accept_virtual_memory(region) },
             PageValidateOp::Invalidate => Ok(()),
         }
+    }
+
+    fn set_guest_page_access(&self, _region: MemoryRegion<PhysAddr>, _guest_visible: bool) {
+        todo!();
     }
 
     fn configure_alternate_injection(&mut self, alt_inj_requested: bool) -> Result<(), SvsmError> {

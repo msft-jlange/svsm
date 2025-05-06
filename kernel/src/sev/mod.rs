@@ -20,5 +20,5 @@ pub use secrets_page::{secrets_page, secrets_page_mut, SecretsPage, VMPCK_SIZE};
 pub use snp_apic::{GHCBApicAccessor, GHCB_APIC_ACCESSOR};
 pub use status::sev_status_init;
 pub use status::sev_status_verify;
-pub use utils::{pvalidate, pvalidate_range, PvalidateOp, SevSnpError};
+pub use utils::{pvalidate, pvalidate_range, rmp_adjust_range, PvalidateOp, SevSnpError};
 pub use utils::{rmp_adjust, RMPFlags};

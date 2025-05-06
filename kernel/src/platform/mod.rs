@@ -168,6 +168,7 @@ pub trait SvsmPlatform: Sync {
         &self,
         region: MemoryRegion<PhysAddr>,
         op: PageValidateOp,
+        guest_visible: bool,
     ) -> Result<(), SvsmError>;
 
     /// Marks a virtual range of pages as valid or invalid for use as private
@@ -181,6 +182,9 @@ pub trait SvsmPlatform: Sync {
         region: MemoryRegion<VirtAddr>,
         op: PageValidateOp,
     ) -> Result<(), SvsmError>;
+
+    /// Makes a page accessible or inaccessible to a guest VMPL.
+    fn set_guest_page_access(&self, region: MemoryRegion<PhysAddr>, guest_visible: bool);
 
     /// Performs a system-wide TLB flush.
     fn flush_tlb(&self, flush_scope: &TlbFlushScope) {

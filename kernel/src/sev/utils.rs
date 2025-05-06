@@ -52,6 +52,41 @@ impl fmt::Display for SevSnpError {
     }
 }
 
+fn convert_size_mismatch_error(result: Result<(), SvsmError>) -> Result<bool, SvsmError> {
+    match result {
+        Ok(_) => Ok(false),
+        Err(err) => {
+            if let SvsmError::SevSnp(SevSnpError::FAIL_SIZEMISMATCH(_)) = err {
+                Ok(true)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+/// # Safety
+/// The caller is required to ensure that conversion of the virtual address
+/// does not violate memory safety.  Memory safety could be affected if the
+/// page is exposed to a lower VMPL or becomes a VMSA.
+unsafe fn pvalidate_2m(addr: VirtAddr, valid: PvalidateOp) -> Result<bool, SvsmError> {
+    convert_size_mismatch_error(
+        // SAFETY: the caller promises that the validation operation is safe.
+        unsafe { pvalidate(addr, PageSize::Huge, valid) },
+    )
+}
+
+/// # Safety
+/// The caller is required to ensure that conversion of the virtual address
+/// does not violate memory safety.  Memory safety could be affected if the
+/// page is exposed to a lower VMPL or becomes a VMSA.
+unsafe fn rmp_adjust_2m(addr: VirtAddr, flags: RMPFlags) -> Result<bool, SvsmError> {
+    convert_size_mismatch_error(
+        // SAFETY: the caller promises that the adjust operation is safe.
+        unsafe { rmp_adjust(addr, flags, PageSize::Huge) },
+    )
+}
+
 /// # Safety
 /// The caller is required to ensure that conversion of the virtual address
 /// range does not violate memory safety.
@@ -71,10 +106,29 @@ unsafe fn pvalidate_range_4k(
 
 /// # Safety
 /// The caller is required to ensure that conversion of the virtual address
+/// does not violate memory safety.  Memory safety could be affected if the
+/// page is exposed to a lower VMPL or becomes a VMSA.
+unsafe fn rmp_adjust_range_4k(
+    region: MemoryRegion<VirtAddr>,
+    flags: RMPFlags,
+) -> Result<(), SvsmError> {
+    for addr in region.iter_pages(PageSize::Regular) {
+        // SAFETY: the caller promises that the adjust operation is safe.
+        unsafe {
+            rmp_adjust(addr, flags, PageSize::Regular)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// # Safety
+/// The caller is required to ensure that conversion of the virtual address
 /// range does not violate memory safety.
 pub unsafe fn pvalidate_range(
     region: MemoryRegion<VirtAddr>,
     valid: PvalidateOp,
+    guest_visible: bool,
 ) -> Result<(), SvsmError> {
     let mut addr = region.start();
     let end = region.end();
@@ -82,28 +136,103 @@ pub unsafe fn pvalidate_range(
     while addr < end {
         // Validation as a 2 MB page can only be attempted if the underlying
         // mapping is a 2 MB mapping.
+        // SAFETY: the caller promises that the validate and adjust operations
+        // performed in this loop are safe.
+        unsafe {
+            if addr.is_aligned(PAGE_SIZE_2M)
+                && addr + PAGE_SIZE_2M <= end
+                && virt_to_frame(addr).size() >= PAGE_SIZE_2M
+            {
+                // If a page being invalidated was was previously
+                // guest-visible, then reset guest VMPL permissions now.  This
+                // is required because the next time the page is validated, it
+                // may be validated for private usage, and if the host hasn't
+                // reassigned the physical page, the VMPL permissions may be
+                // unchanged.  Therefore they must be set to default here.
+                let mut split = if guest_visible && valid == PvalidateOp::Invalid {
+                    rmp_adjust_2m(addr, RMPFlags::GUEST_VMPL | RMPFlags::NONE)?
+                } else {
+                    false
+                };
+
+                // Try to validate as a huge page unless the huge page
+                // operation above failed.
+                if !split && pvalidate_2m(addr, valid)? {
+                    split = true;
+                }
+                if split {
+                    pvalidate_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), valid)?;
+                }
+
+                // If a page being validated should be made guest-visible, then
+                // make it guest-visible now.
+                if guest_visible && valid == PvalidateOp::Valid {
+                    let flags = RMPFlags::GUEST_VMPL | RMPFlags::RWX;
+                    if !split && rmp_adjust_2m(addr, flags)? {
+                        split = true;
+                    }
+                    if split {
+                        rmp_adjust_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), flags)?;
+                    }
+                }
+                addr = addr + PAGE_SIZE_2M;
+            } else {
+                if guest_visible && valid == PvalidateOp::Invalid {
+                    rmp_adjust(
+                        addr,
+                        RMPFlags::GUEST_VMPL | RMPFlags::NONE,
+                        PageSize::Regular,
+                    )?;
+                }
+                pvalidate(addr, PageSize::Regular, valid)?;
+                if guest_visible && valid == PvalidateOp::Valid {
+                    rmp_adjust(
+                        addr,
+                        RMPFlags::GUEST_VMPL | RMPFlags::RWX,
+                        PageSize::Regular,
+                    )?;
+                }
+                addr = addr + PAGE_SIZE;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// # Safety
+/// The caller is required to ensure that conversion of the virtual address
+/// does not violate memory safety.  Memory safety could be affected if the
+/// page is exposed to a lower VMPL or becomes a VMSA.
+pub unsafe fn rmp_adjust_range(
+    region: MemoryRegion<VirtAddr>,
+    flags: RMPFlags,
+) -> Result<(), SvsmError> {
+    let mut addr = region.start();
+    let end = region.end();
+
+    while addr < end {
+        // Operation on a 2 MB page can only be attempted if the underlying
+        // mapping is a 2 MB mapping.
         if addr.is_aligned(PAGE_SIZE_2M)
             && addr + PAGE_SIZE_2M <= end
             && virt_to_frame(addr).size() >= PAGE_SIZE_2M
         {
-            // Try to validate as a huge page.
-            // If we fail, try to fall back to regular-sized pages.
-            // SAFETY: the caller promises that the validation operation is
-            // safe.
+            // Try to adjust as a huge page.  If this is not possible, adjust
+            // as a series of 4 KB pages.
+            // SAFETY: the caller promises that the adjust operation is safe
+            // for this address range.
             unsafe {
-                pvalidate(addr, PageSize::Huge, valid).or_else(|err| match err {
-                    SvsmError::SevSnp(SevSnpError::FAIL_SIZEMISMATCH(_)) => {
-                        pvalidate_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), valid)
-                    }
-                    _ => Err(err),
-                })?;
+                if rmp_adjust_2m(addr, flags)? {
+                    rmp_adjust_range_4k(MemoryRegion::new(addr, PAGE_SIZE_2M), flags)?;
+                }
             }
             addr = addr + PAGE_SIZE_2M;
         } else {
-            // SAFETY: the caller promises that the validation operation is
-            // safe.
+            // SAFETY: the caller promises that the adjust operation is safe
+            // for this address range.
             unsafe {
-                pvalidate(addr, PageSize::Regular, valid)?;
+                rmp_adjust(addr, flags, PageSize::Regular)?;
             }
             addr = addr + PAGE_SIZE;
         }
@@ -225,6 +354,7 @@ pub fn raw_vmgexit() {
 }
 
 bitflags::bitflags! {
+    #[derive(Copy, Clone)]
     pub struct RMPFlags: u64 {
         const VMPL0 = 0;
         const VMPL1 = 1;

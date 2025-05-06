@@ -150,7 +150,9 @@ impl SvsmPlatform for NativePlatform {
         &self,
         _region: MemoryRegion<PhysAddr>,
         _op: PageValidateOp,
+        guest_visible: bool,
     ) -> Result<(), SvsmError> {
+        assert!(!guest_visible);
         Ok(())
     }
 
@@ -175,6 +177,10 @@ impl SvsmPlatform for NativePlatform {
             }
         }
         Ok(())
+    }
+
+    fn set_guest_page_access(&self, _region: MemoryRegion<PhysAddr>, _guest_visible: bool) {
+        todo!();
     }
 
     fn configure_alternate_injection(&mut self, _alt_inj_requested: bool) -> Result<(), SvsmError> {
