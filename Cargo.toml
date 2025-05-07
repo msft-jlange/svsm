@@ -7,6 +7,7 @@ members = [
     # binary targets
     "stage1",
     "kernel",
+    "stage2",
     # fuzzing
     "fuzz",
     # ELF loader
@@ -36,8 +37,8 @@ members = [
 bootlib = { path = "bootlib" }
 cpuarch = { path = "cpuarch" }
 test = { path = "test" }
-svsm = { path = "kernel" }
 elf = { path = "elf" }
+svsm = { path = "svsm" }
 libtcgtpm = { path = "libtcgtpm" }
 syscall = { path = "syscall" }
 packit = { path = "packit" }

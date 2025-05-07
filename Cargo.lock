@@ -692,6 +692,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "bitfield-struct 0.6.2",
+ "bitflags 2.6.0",
+ "bootlib",
+ "builtin",
+ "builtin_macros",
+ "cpuarch",
+ "elf",
+ "gdbstub",
+ "gdbstub_arch",
+ "igvm_defs",
+ "intrusive-collections",
+ "libtcgtpm",
+ "log",
+ "packit",
+ "release",
+ "rustc_version",
+ "sha2",
+ "svsm",
+ "syscall",
+ "test",
+ "uuid",
+ "verify_external",
+ "verify_proof",
+ "vstd",
+ "zerocopy 0.8.10",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1068,6 +1100,25 @@ name = "stage1"
 version = "0.1.0"
 dependencies = [
  "bootlib",
+]
+
+[[package]]
+name = "stage2"
+version = "0.1.0"
+dependencies = [
+ "bootlib",
+ "builtin",
+ "cpuarch",
+ "elf",
+ "gdbstub",
+ "gdbstub_arch",
+ "log",
+ "release",
+ "rustc_version",
+ "svsm",
+ "test",
+ "verify_external",
+ "verify_proof",
 ]
 
 [[package]]
