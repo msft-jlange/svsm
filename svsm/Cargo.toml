@@ -1,12 +1,8 @@
 [package]
-name = "kernel"
+name = "svsm"
 version = "0.1.0"
 edition = "2021"
-
-[[bin]]
-name = "svsm"
-path = "src/svsm.rs"
-test = false
+rust-version = "1.84.0"
 
 [lib]
 test = true
@@ -16,7 +12,6 @@ doctest = true
 bootlib.workspace = true
 cpuarch.workspace = true
 elf.workspace = true
-svsm.workspace = true
 syscall.workspace = true
 
 aes-gcm = { workspace = true, features = ["aes", "alloc"] }
