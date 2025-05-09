@@ -30,7 +30,7 @@ use bootlib::kernel_launch::{ApStartContext, SIPI_STUB_GPA};
 use core::{mem, ptr};
 use syscall::GlobalFeatureFlags;
 
-#[cfg(test)]
+#[cfg(any(test, test_in_svsm))]
 use bootlib::platform::SvsmPlatformType;
 
 static GHCI_IO_DRIVER: GHCIIOPort = GHCIIOPort::new();
@@ -64,7 +64,7 @@ impl TdpPlatform {
 }
 
 impl SvsmPlatform for TdpPlatform {
-    #[cfg(test)]
+    #[cfg(any(test, test_in_svsm))]
     fn platform_type(&self) -> SvsmPlatformType {
         SvsmPlatformType::Tdp
     }

@@ -721,7 +721,6 @@ dependencies = [
  "sha2",
  "svsm",
  "syscall",
- "test",
  "uuid",
  "verify_external",
  "verify_proof",
@@ -1162,7 +1161,6 @@ dependencies = [
  "release",
  "rustc_version",
  "svsm",
- "test",
  "verify_external",
  "verify_proof",
 ]
@@ -1218,7 +1216,7 @@ dependencies = [
  "rustc_version",
  "sha2",
  "syscall",
- "test",
+ "test_svsm",
  "uuid",
  "verify_external",
  "verify_proof",
@@ -1277,7 +1275,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test"
+name = "test_svsm"
 version = "0.1.0"
 
 [[package]]

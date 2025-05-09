@@ -35,7 +35,7 @@ use core::{mem, ptr};
 #[cfg(debug_assertions)]
 use crate::mm::virt_to_phys;
 
-#[cfg(test)]
+#[cfg(any(test, test_in_svsm))]
 use bootlib::platform::SvsmPlatformType;
 
 #[derive(Clone, Copy, Debug)]
@@ -57,7 +57,7 @@ impl NativePlatform {
 }
 
 impl SvsmPlatform for NativePlatform {
-    #[cfg(test)]
+    #[cfg(any(test, test_in_svsm))]
     fn platform_type(&self) -> SvsmPlatformType {
         SvsmPlatformType::Native
     }

@@ -39,7 +39,7 @@ members = [
 # internal library crates
 bootlib = { path = "bootlib" }
 cpuarch = { path = "cpuarch" }
-test = { path = "test" }
+test_svsm = { path = "test_svsm" }
 svsm = { path = "svsm" }
 elf = { path = "elf" }
 verus_stub = { path = "verus_stub" }
