@@ -4,8 +4,8 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![cfg_attr(not(test_in_svsm), no_std)]
+#![cfg_attr(not(test_in_svsm), no_main)]
 
 extern crate alloc;
 

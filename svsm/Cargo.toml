@@ -36,9 +36,7 @@ builtin_macros = { workspace = true }
 vstd = { workspace = true }
 verify_proof = { workspace = true, optional = true}
 verify_external = { workspace = true, optional = true}
-
-[target."x86_64-unknown-none".dev-dependencies]
-test.workspace = true
+test_svsm.workspace = true
 
 [features]
 default = []

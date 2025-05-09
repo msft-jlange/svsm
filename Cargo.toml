@@ -36,7 +36,7 @@ members = [
 # internal library crates
 bootlib = { path = "bootlib" }
 cpuarch = { path = "cpuarch" }
-test = { path = "test" }
+test_svsm = { path = "test_svsm" }
 elf = { path = "elf" }
 svsm = { path = "svsm" }
 libtcgtpm = { path = "libtcgtpm" }
