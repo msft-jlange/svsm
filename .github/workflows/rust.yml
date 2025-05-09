@@ -47,7 +47,7 @@ jobs:
         run: cargo clippy --workspace --exclude igvmbuilder --exclude igvmmeasure --exclude svsm-fuzz --exclude packit --exclude stage1 --all-features -- -D warnings
 
       - name: Clippy on std x86_64-unknown-linux-gnu
-        run: cargo clippy --workspace --all-features --exclude svsm --exclude svsm-fuzz --exclude packit --exclude stage1 --target=x86_64-unknown-linux-gnu -- -D warnings
+        run: cargo clippy --workspace --all-features --exclude svsm --exclude kernel --exclude stage2 --exclude svsm-fuzz --exclude packit --exclude stage1 --target=x86_64-unknown-linux-gnu -- -D warnings
 
       - name: Clippy on stage1
         run: cargo clippy --package stage1 --all-features --target=x86_64-unknown-linux-gnu -- -D warnings -C panic=abort
