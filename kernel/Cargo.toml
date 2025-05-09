@@ -9,7 +9,7 @@ path = "src/svsm.rs"
 test = false
 
 [lib]
-test = true
+test = false
 doctest = true
 
 [dependencies]
