@@ -18,7 +18,7 @@
             "binary": true
         },
         "stage2": {
-            "manifest": "kernel/Cargo.toml",
+            "manifest": "stage2/Cargo.toml",
             "binary": true,
             "objcopy": "binary"
         },
