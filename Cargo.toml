@@ -8,6 +8,7 @@ members = [
     # binary targets
     "stage1",
     "kernel",
+    "stage2",
     # fuzzing
     "fuzz",
     # ELF loader
@@ -39,7 +40,7 @@ members = [
 bootlib = { path = "bootlib" }
 cpuarch = { path = "cpuarch" }
 test = { path = "test" }
-svsm = { path = "kernel" }
+svsm = { path = "svsm" }
 elf = { path = "elf" }
 verus_stub = { path = "verus_stub" }
 verus_macro_stub = { path = "verus_macro_stub" }
