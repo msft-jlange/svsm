@@ -1,0 +1,44 @@
+[package]
+name = "stage2"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "stage2"
+path = "src/stage2.rs"
+test = false
+
+[dependencies]
+bootlib.workspace = true
+cpuarch.workspace = true
+elf.workspace = true
+svsm.workspace = true
+
+gdbstub = { workspace = true, optional = true }
+gdbstub_arch = { workspace = true, optional = true }
+log = { workspace = true, features = ["max_level_info", "release_max_level_info"] }
+release.workspace = true
+
+builtin = { workspace = true, optional = true }
+verify_proof = { workspace = true, optional = true}
+verify_external = { workspace = true, optional = true}
+
+[target."x86_64-unknown-none".dev-dependencies]
+test.workspace = true
+
+[features]
+default = []
+enable-gdb = ["dep:gdbstub", "dep:gdbstub_arch"]
+nosmep = []
+nosmap = []
+verus_all = ["builtin", "verify_proof/verus", "verify_external/verus"]
+verus = ["verus_all", "verify_proof/noverify", "verify_external/noverify"]
+noverify = []
+
+[dev-dependencies]
+
+[build-dependencies]
+rustc_version = "0.4"
+
+[lints]
+workspace = true

@@ -137,17 +137,17 @@ bin/meta.bin: utils/gen_meta utils/print-meta bin
 	./utils/gen_meta $@
 
 bin/stage2.bin: bin
-	cargo build --package svsm --bin stage2 ${CARGO_ARGS} --target=x86_64-unknown-none
+	cargo build --package stage2 --bin stage2 ${CARGO_ARGS} --target=x86_64-unknown-none
 	objcopy -O binary ${STAGE2_ELF} $@
 
 bin/svsm-kernel.elf: bin
-	cargo build --package svsm --bin svsm ${CARGO_ARGS} ${SVSM_ARGS} --target=x86_64-unknown-none
+	cargo build --package kernel --bin svsm ${CARGO_ARGS} ${SVSM_ARGS} --target=x86_64-unknown-none
 	objcopy -O elf64-x86-64 --strip-unneeded ${SVSM_KERNEL_ELF} $@
 
 bin/test-kernel.elf: bin
 # RUSTDOC=true removes doctests, which is necessary as they do not work with
 # custom test runners. See https://github.com/coconut-svsm/svsm/issues/705.
-	RUSTDOC=true LINK_TEST=1 cargo +nightly test --package svsm ${CARGO_ARGS} ${SVSM_ARGS_TEST} \
+	RUSTDOC=true LINK_TEST=1 cargo +nightly test --package kernel ${CARGO_ARGS} ${SVSM_ARGS_TEST} \
 		--target=x86_64-unknown-none \
 		--config 'target.x86_64-unknown-none.runner=["sh", "-c", "cp $$0 ../${TEST_KERNEL_ELF}"]'
 	objcopy -O elf64-x86-64 --strip-unneeded ${TEST_KERNEL_ELF} bin/test-kernel.elf
