@@ -35,11 +35,12 @@
     },
     "kernel": {
         "svsm": {
+            "manifest": "kernel/Cargo.toml",
             "features": "vtpm,enable-gdb",
             "binary": true
         },
         "stage2": {
-            "manifest": "kernel/Cargo.toml",
+            "manifest": "stage2/Cargo.toml",
             "binary": true,
             "objcopy": "binary"
         },
