@@ -190,9 +190,10 @@ bin/svsm-test.bin: bin/svsm-test
 	objcopy -O binary $< $@
 
 clippy:
-	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --exclude svsm --exclude stage1 --exclude svsm-fuzz -- ${CLIPPY_ARGS}
+	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --exclude kernel --exclude stage2 --exclude svsm --exclude stage1 --exclude svsm-fuzz -- ${CLIPPY_ARGS}
 	RUSTFLAGS="--cfg fuzzing" cargo clippy ${CLIPPY_OPTIONS} --all-features --package svsm-fuzz -- ${CLIPPY_ARGS}
-	cargo clippy ${CLIPPY_OPTIONS} --all-features --package svsm --target x86_64-unknown-none -- ${CLIPPY_ARGS}
+	cargo clippy ${CLIPPY_OPTIONS} --all-features --package kernel --target x86_64-unknown-none -- ${CLIPPY_ARGS}
+	cargo clippy ${CLIPPY_OPTIONS} --all-features --package stage2 --target x86_64-unknown-none -- ${CLIPPY_ARGS}
 	cargo clippy ${CLIPPY_OPTIONS} --all-features --package stage1 --target x86_64-unknown-none -- ${CLIPPY_ARGS} ${STAGE1_RUSTC_ARGS}
 	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --tests --exclude packit -- ${CLIPPY_ARGS}
 

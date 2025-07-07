@@ -44,10 +44,11 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy on no_std x86_64-unknown-none
-        run: cargo clippy --all-features --package svsm --target=x86_64-unknown-none -- -D warnings
+        run: cargo clippy --all-features --package kernel --target=x86_64-unknown-none -- -D warnings
+        run: cargo clippy --all-features --package stage2 --target=x86_64-unknown-none -- -D warnings
 
       - name: Clippy on std x86_64-unknown-linux-gnu
-        run: cargo clippy --all-features --workspace --exclude svsm --exclude stage1 --exclude svsm-fuzz -- -D warnings
+        run: cargo clippy --all-features --workspace --exclude kernel --exclude stage2 --exclude svsm --exclude stage1 --exclude svsm-fuzz -- -D warnings
 
       - name: Clippy on stage1
         run: cargo clippy --all-features --package stage1 --target=x86_64-unknown-none -- -D warnings -C panic=abort
