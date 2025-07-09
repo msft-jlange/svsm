@@ -8,7 +8,7 @@ endif
 
 DEPS_DIR = $(CURDIR)/deps
 
-LIBCRT_DIR = $(DEPS_DIR)/libcrt
+LIBCRT_DIR = $(PROJ_ROOT)/libcrt
 OPENSSL_DIR = $(DEPS_DIR)/openssl
 TCGTPM_DIR = $(DEPS_DIR)/tpm-20-ref/TPMCmd
 
@@ -24,7 +24,7 @@ LIBPLATFORM = $(TCGTPM_DIR)/$(LIBPLATFORM_A)
 OPENSSL_MAKEFILE = $(OPENSSL_DIR)/Makefile
 TCGTPM_MAKEFILE = $(TCGTPM_DIR)/Makefile
 
-LIBS = $(LIBCRT) $(LIBCRYPTO) $(LIBTPM) $(LIBPLATFORM)
+LIBS = $(LIBCRYPTO) $(LIBTPM) $(LIBPLATFORM)
 
 OUT_DIR ?= $(CWD)
 
@@ -34,12 +34,8 @@ $(OUT_DIR)/libtcgtpm.a: $(LIBS)
 	rm -f $@
 	ar rcsTPD $@ $^
 
-# libcrt
-$(LIBCRT):
-	$(MAKE) -C $(LIBCRT_DIR)
-
 # openssl
-$(LIBCRYPTO): $(OPENSSL_MAKEFILE) $(LIBCRT)
+$(LIBCRYPTO): $(OPENSSL_MAKEFILE)
 	$(MAKE) -C $(OPENSSL_DIR) -j$$(nproc)
 
 $(OPENSSL_MAKEFILE):
@@ -171,7 +167,6 @@ $(TCGTPM_MAKEFILE):
 			LIBCRYPTO_CFLAGS="${TCGTPM_CFLAGS}")
 
 clean: $(OPENSSL_MAKEFILE) $(TCGTPM_MAKEFILE)
-	make -C $(LIBCRT_DIR) clean
 	make -C $(OPENSSL_DIR) clean
 	make -C $(TCGTPM_DIR) clean
 	rm -f libtcgtpm.a

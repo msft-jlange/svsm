@@ -32,6 +32,9 @@ else ifeq ($(V), 2)
 CARGO_ARGS += -vv
 endif
 
+PROJ_ROOT ?= $(CURDIR)
+export PROJ_ROOT
+
 STAGE1_RUSTC_ARGS += -C panic=abort
 
 STAGE1_ELF = "target/x86_64-unknown-none/${TARGET_PATH}/stage1"
@@ -63,6 +66,8 @@ all: bin/svsm.bin igvm
 
 igvm: $(IGVM_FILES) $(IGVMBIN) $(IGVMMEASUREBIN)
 
+cdeps: libcrt/libcrt.a
+
 bin:
 	mkdir -v -p bin
 
@@ -77,6 +82,9 @@ $(IGVMBUILDER):
 
 $(IGVMMEASURE):
 	cargo build ${CARGO_ARGS} --package igvmmeasure
+
+libcrt/libcrt.a:
+	make -C libcrt
 
 bin/coconut-qemu.igvm: $(IGVMBUILDER) $(IGVMMEASURE) bin/stage1-trampoline.bin bin/svsm-kernel.elf bin/stage2.bin ${FS_BIN}
 	$(IGVMBUILDER) --sort --policy 0x30000 --output $@ --tdx-stage1 bin/stage1-trampoline.bin --stage2 bin/stage2.bin --kernel bin/svsm-kernel.elf --filesystem ${FS_BIN} ${BUILD_FW} qemu --snp --tdp
@@ -201,6 +209,7 @@ clean:
 	rm -f stage1/*.o stage1/*.bin stage1/*.elf
 	rm -f utils/gen_meta utils/print-meta
 	rm -rf bin
+	make -C libcrt clean
 
 distclean: clean
 	$(MAKE) -C libtcgtpm $@
