@@ -18,8 +18,7 @@ use crate::cpu::efer::read_efer;
 use crate::cpu::idt::common::INT_INJ_VECTOR;
 use crate::cpu::shadow_stack::init_shadow_stack;
 use crate::cpu::tss::TSS_LIMIT;
-use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa};
-use crate::cpu::vmsa::{svsm_code_segment, svsm_data_segment, svsm_gdt_segment, svsm_idt_segment};
+use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa, svsm_code_segment, svsm_data_segment, svsm_gdt_segment, svsm_idt_segment};
 use crate::cpu::x86::{ApicAccess, X86Apic};
 use crate::cpu::{IrqGuard, IrqState, LocalApic, ShadowStackInit};
 use crate::error::{ApicError, SvsmError};
@@ -47,12 +46,12 @@ use crate::types::{
     PAGE_SHIFT, PAGE_SHIFT_2M, PAGE_SIZE, PAGE_SIZE_2M, SVSM_TR_ATTRIBUTES, SVSM_TSS,
 };
 use crate::utils::MemoryRegion;
-use alloc::boxed::Box;
+use crate::utils::immut_after_init::ImmutAfterInitCell;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::cell::{Cell, OnceCell, Ref, RefCell, RefMut, UnsafeCell};
+use core::cell::{Cell, OnceCell, Ref, RefCell, RefMut};
 use core::mem::size_of;
 use core::ops::Deref;
 use core::ptr;
@@ -70,95 +69,46 @@ pub static PERCPU_AREAS: PerCpuAreas = PerCpuAreas::new();
 // all writes are done.
 #[derive(Debug)]
 pub struct PerCpuAreas {
-    areas: UnsafeCell<Vec<&'static PerCpuShared>>,
+    areas: ImmutAfterInitCell<&'static [PerCpuShared]>,
 }
-
-// SAFETY: Any operation that can affect synchronization safety is declared as
-// unsafe, and therefore callers guarantee that synchronization is always
-// maintained. Also see comment above struct declaration.
-unsafe impl Sync for PerCpuAreas {}
 
 impl PerCpuAreas {
     const fn new() -> Self {
         Self {
-            areas: UnsafeCell::new(Vec::new()),
+            areas: ImmutAfterInitCell::uninit(),
         }
     }
 
-    /// # Safety
-    /// The areas vector obtained here is not multi-thread safe, so the caller
-    /// must guarantee that is not used in a context that expects multi-thread
-    /// safety.
-    unsafe fn get_areas(&self) -> &Vec<&'static PerCpuShared> {
-        // SAFETY: the caller guarantees that accessing the unsafe cell is
-        // appropriate.
-        unsafe { &*self.areas.get() }
-    }
-
-    /// # Safety
-    /// This function can only be invoked before any other processors have
-    /// started.  Otherwise, accesses to the areas vector will not be safe.
-    pub unsafe fn create_new(&self, apic_id: u32) -> &'static PerCpuShared {
-        // SAFETY: the caller guarantees that it is safe to obtain a mutable
-        // reference to the areas vector.
-        let areas = unsafe { &mut *self.areas.get() };
-
-        // Allocate a new shared per-CPU area to describe the APIC ID being
-        // created.  The CPU index will be the next in sequence ased on the
-        // size of the vector.  The new shared per-CPU area is allocated on
-        // the heap so it is globally visible.
-        let cpu_index = areas.len();
-        let percpu_shared = Box::leak(Box::new(PerCpuShared::new(apic_id, cpu_index)));
-
-        // Leak the box so the allocation persists with a static lifetime,
-        // and install the allocated per-CPU area into the areas vector.
-        areas.push(percpu_shared);
-
-        percpu_shared
+    pub fn setup(&self, cpus: Vec<PerCpuShared>)
+    {
+        self.areas.init(cpus.leak()).expect("PerCpuAreas already initialized");
     }
 
     pub fn len(&self) -> usize {
-        // SAFETY: it is safe to obtain a shared reference to the areas
-        // vector because callers attempting to mutate the vector guarantee
-        // that they cannot race with iteration.
-        let areas = unsafe { self.get_areas() };
-        areas.len()
+        self.areas.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        // SAFETY: it is safe to obtain a shared reference to the areas
-        // vector because callers attempting to mutate the vector guarantee
-        // that they cannot race with iteration.
-        let areas = unsafe { self.get_areas() };
-        areas.is_empty()
+        self.areas.is_empty()
     }
 
-    pub fn iter(&self) -> Iter<'_, &'static PerCpuShared> {
-        // SAFETY: it is safe to obtain a shared reference to the areas
-        // vector because callers attempting to mutate the vector guarantee
-        // that they cannot race with iteration.
-        let areas = unsafe { self.get_areas() };
-        areas.iter()
+    pub fn iter(&self) -> Iter<'_, PerCpuShared> {
+        self.areas.iter()
     }
 
     // Fails if no such area exists or its address is NULL
-    pub fn get_by_apic_id(&self, apic_id: u32) -> Option<&'static PerCpuShared> {
+    pub fn get_by_apic_id(&self, apic_id: u32) -> Option<&PerCpuShared> {
         // For this to not produce UB the only invariant we must
         // uphold is that there are no mutations or mutable aliases
         // going on when casting via as_ref(). This only happens via
         // Self::push(), which is intentionally unsafe and private.
         self.iter()
             .find(|shared| shared.apic_id() == apic_id)
-            .copied()
     }
 
     /// Callers are expected to specify a valid CPU index.
     pub fn get_by_cpu_index(&self, index: usize) -> &'static PerCpuShared {
-        // SAFETY: it is safe to obtain a shared reference to the areas
-        // vector because callers attempting to mutate the vector guarantee
-        // that they cannot race with iteration.
-        let areas = unsafe { self.get_areas() };
-        areas[index]
+        &self.areas[index]
     }
 }
 
