@@ -4,162 +4,18 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
-extern crate alloc;
-
 use crate::address::PhysAddr;
-use crate::config::SvsmConfig;
 use crate::cpu::cpuid::copy_cpuid_table_to;
+use crate::cpu::efer::EFERFlags;
 use crate::cpu::percpu::{current_ghcb, this_cpu, this_cpu_shared};
 use crate::error::SvsmError;
+use crate::guest_fw::{GuestFwInfo, GuestFwLaunchState};
 use crate::mm::PerCPUPageMappingGuard;
-use crate::platform::PageStateChangeOp;
-use crate::sev::{pvalidate, rmp_adjust, secrets_page, PvalidateOp, RMPFlags};
-use crate::types::{PageSize, GUEST_VMPL, PAGE_SIZE};
+use crate::sev::secrets_page;
+use crate::types::{GUEST_VMPL, PAGE_SIZE};
 use crate::utils::{zero_mem_region, MemoryRegion};
-use alloc::vec::Vec;
 
-#[derive(Clone, Debug, Default)]
-pub struct SevFWMetaData {
-    pub cpuid_page: Option<PhysAddr>,
-    pub secrets_page: Option<PhysAddr>,
-    pub caa_page: Option<PhysAddr>,
-    pub valid_mem: Vec<MemoryRegion<PhysAddr>>,
-}
-
-impl SevFWMetaData {
-    pub const fn new() -> Self {
-        Self {
-            cpuid_page: None,
-            secrets_page: None,
-            caa_page: None,
-            valid_mem: Vec::new(),
-        }
-    }
-
-    pub fn add_valid_mem(&mut self, base: PhysAddr, len: usize) {
-        self.valid_mem.push(MemoryRegion::new(base, len));
-    }
-}
-
-fn validate_fw_mem_region(
-    config: &SvsmConfig<'_>,
-    region: MemoryRegion<PhysAddr>,
-) -> Result<(), SvsmError> {
-    let pstart = region.start();
-    let pend = region.end();
-
-    log::info!("Validating {:#018x}-{:#018x}", pstart, pend);
-
-    if config.page_state_change_required() {
-        current_ghcb()
-            .page_state_change(region, PageSize::Regular, PageStateChangeOp::Private)
-            .expect("GHCB PSC call failed to validate firmware memory");
-    }
-
-    for paddr in region.iter_pages(PageSize::Regular) {
-        let guard = PerCPUPageMappingGuard::create_4k(paddr)?;
-        let vaddr = guard.virt_addr();
-
-        // SAFETY: the virtual address mapping is known to point to the guest
-        // physical address range supplied by the caller.
-        unsafe {
-            pvalidate(vaddr, PageSize::Regular, PvalidateOp::Valid)?;
-
-            // Make page accessible to guest VMPL
-            rmp_adjust(
-                vaddr,
-                RMPFlags::GUEST_VMPL | RMPFlags::RWX,
-                PageSize::Regular,
-            )?;
-
-            zero_mem_region(vaddr, vaddr + PAGE_SIZE);
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_fw_memory_vec(
-    config: &SvsmConfig<'_>,
-    regions: Vec<MemoryRegion<PhysAddr>>,
-) -> Result<(), SvsmError> {
-    if regions.is_empty() {
-        return Ok(());
-    }
-
-    let mut next_vec = Vec::new();
-    let mut region = regions[0];
-
-    for next in regions.into_iter().skip(1) {
-        if region.contiguous(&next) {
-            region = region.merge(&next);
-        } else {
-            next_vec.push(next);
-        }
-    }
-
-    validate_fw_mem_region(config, region)?;
-    validate_fw_memory_vec(config, next_vec)
-}
-
-pub fn validate_fw_memory(
-    config: &SvsmConfig<'_>,
-    fw_meta: &SevFWMetaData,
-    kernel_region: &MemoryRegion<PhysAddr>,
-) -> Result<(), SvsmError> {
-    // Initalize vector with regions from the FW
-    let mut regions = fw_meta.valid_mem.clone();
-
-    // Add region for CPUID page if present
-    if let Some(cpuid_paddr) = fw_meta.cpuid_page {
-        regions.push(MemoryRegion::new(cpuid_paddr, PAGE_SIZE));
-    }
-
-    // Add region for Secrets page if present
-    if let Some(secrets_paddr) = fw_meta.secrets_page {
-        regions.push(MemoryRegion::new(secrets_paddr, PAGE_SIZE));
-    }
-
-    // Add region for CAA page if present
-    if let Some(caa_paddr) = fw_meta.caa_page {
-        regions.push(MemoryRegion::new(caa_paddr, PAGE_SIZE));
-    }
-
-    // Sort regions by base address
-    regions.sort_unstable_by_key(|a| a.start());
-
-    for region in regions.iter() {
-        if region.overlap(kernel_region) {
-            log::error!("FwMeta region ovelaps with kernel");
-            return Err(SvsmError::Firmware);
-        }
-    }
-
-    validate_fw_memory_vec(config, regions)
-}
-
-pub fn print_fw_meta(fw_meta: &SevFWMetaData) {
-    log::info!("FW Meta Data");
-
-    match fw_meta.cpuid_page {
-        Some(addr) => log::info!("  CPUID Page   : {:#010x}", addr),
-        None => log::info!("  CPUID Page   : None"),
-    };
-
-    match fw_meta.secrets_page {
-        Some(addr) => log::info!("  Secrets Page : {:#010x}", addr),
-        None => log::info!("  Secrets Page : None"),
-    };
-
-    match fw_meta.caa_page {
-        Some(addr) => log::info!("  CAA Page     : {:#010x}", addr),
-        None => log::info!("  CAA Page     : None"),
-    };
-
-    for region in &fw_meta.valid_mem {
-        log::info!("  Pre-Validated Region {region:#018x}");
-    }
-}
+use cpuarch::vmsa::VMSA;
 
 fn copy_cpuid_table_to_fw(fw_addr: PhysAddr) -> Result<(), SvsmError> {
     let guard = PerCPUPageMappingGuard::create_4k(fw_addr)?;
@@ -220,15 +76,15 @@ fn zero_caa_page(fw_addr: PhysAddr) -> Result<(), SvsmError> {
 }
 
 pub fn copy_tables_to_fw(
-    fw_meta: &SevFWMetaData,
+    fw_info: &GuestFwInfo,
     kernel_region: &MemoryRegion<PhysAddr>,
 ) -> Result<(), SvsmError> {
-    if let Some(addr) = fw_meta.cpuid_page {
+    if let Some(addr) = fw_info.cpuid_page {
         copy_cpuid_table_to_fw(addr)?;
     }
 
-    let secrets_page = fw_meta.secrets_page.ok_or(SvsmError::MissingSecrets)?;
-    let caa_page = fw_meta.caa_page.ok_or(SvsmError::MissingCAA)?;
+    let secrets_page = fw_info.secrets_page.ok_or(SvsmError::MissingSecrets)?;
+    let caa_page = fw_info.caa_page.ok_or(SvsmError::MissingCAA)?;
 
     copy_secrets_page_to_fw(secrets_page, caa_page, kernel_region)?;
 
@@ -237,42 +93,8 @@ pub fn copy_tables_to_fw(
     Ok(())
 }
 
-pub fn validate_fw(
-    config: &SvsmConfig<'_>,
-    kernel_region: &MemoryRegion<PhysAddr>,
-) -> Result<(), SvsmError> {
-    let flash_regions = config.get_fw_regions(kernel_region);
-
-    for (i, region) in flash_regions.into_iter().enumerate() {
-        log::info!(
-            "Flash region {} at {:#018x} size {:018x}",
-            i,
-            region.start(),
-            region.len(),
-        );
-
-        for paddr in region.iter_pages(PageSize::Regular) {
-            let guard = PerCPUPageMappingGuard::create_4k(paddr)?;
-            let vaddr = guard.virt_addr();
-            // SAFETY: the address is known to be a guest page.
-            if let Err(e) = unsafe {
-                rmp_adjust(
-                    vaddr,
-                    RMPFlags::GUEST_VMPL | RMPFlags::RWX,
-                    PageSize::Regular,
-                )
-            } {
-                log::info!("rmpadjust failed for addr {:#018x}", vaddr);
-                return Err(e);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-pub fn prepare_fw_launch(fw_meta: &SevFWMetaData) -> Result<(), SvsmError> {
-    if let Some(caa) = fw_meta.caa_page {
+pub fn prepare_fw_launch(launch_state: &GuestFwLaunchState) -> Result<(), SvsmError> {
+    if let Some(caa) = launch_state.caa_page {
         this_cpu_shared().update_guest_caa(caa);
     }
 
@@ -282,13 +104,85 @@ pub fn prepare_fw_launch(fw_meta: &SevFWMetaData) -> Result<(), SvsmError> {
     Ok(())
 }
 
-pub fn launch_fw(config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
+pub fn initialize_guest_vmsa(
+    vmsa: &mut VMSA,
+    launch_state: &GuestFwLaunchState,
+) -> Result<(), SvsmError> {
+    let Some(ref guest_context) = launch_state.context else {
+        return Ok(());
+    };
+
+    // Copy the specified registers into the VMSA.
+    vmsa.cr0 = guest_context.cr0;
+    vmsa.cr3 = guest_context.cr3;
+    vmsa.cr4 = guest_context.cr4;
+    vmsa.efer = guest_context.efer;
+    vmsa.rip = guest_context.rip;
+    vmsa.rax = guest_context.rax;
+    vmsa.rcx = guest_context.rcx;
+    vmsa.rdx = guest_context.rdx;
+    vmsa.rbx = guest_context.rbx;
+    vmsa.rsp = guest_context.rsp;
+    vmsa.rbp = guest_context.rbp;
+    vmsa.rsi = guest_context.rsi;
+    vmsa.rdi = guest_context.rdi;
+    vmsa.r8 = guest_context.r8;
+    vmsa.r9 = guest_context.r9;
+    vmsa.r10 = guest_context.r10;
+    vmsa.r11 = guest_context.r11;
+    vmsa.r12 = guest_context.r12;
+    vmsa.r13 = guest_context.r13;
+    vmsa.r14 = guest_context.r14;
+    vmsa.r15 = guest_context.r15;
+    vmsa.gdt.base = guest_context.gdt_base;
+    vmsa.gdt.limit = guest_context.gdt_limit;
+
+    // If a non-zero code selector is specified, then set the code segment
+    // attributes based on EFER.LMA.
+    if guest_context.code_selector != 0 {
+        vmsa.cs.selector = guest_context.code_selector;
+        let efer_lma = EFERFlags::LMA;
+        if (vmsa.efer & efer_lma.bits()) != 0 {
+            vmsa.cs.flags = 0xA9B;
+        } else {
+            vmsa.cs.flags = 0xC9B;
+            vmsa.cs.limit = 0xFFFFFFFF;
+        }
+    }
+
+    let efer_svme = EFERFlags::SVME;
+    vmsa.efer &= !efer_svme.bits();
+
+    // If a non-zero data selector is specified, then modify the data segment
+    // attributes to be compatible with protected mode.
+    if guest_context.data_selector != 0 {
+        vmsa.ds.selector = guest_context.data_selector;
+        vmsa.ds.flags = 0xA93;
+        vmsa.ds.limit = 0xFFFFFFFF;
+        vmsa.ss = vmsa.ds;
+        vmsa.es = vmsa.ds;
+        vmsa.fs = vmsa.ds;
+        vmsa.gs = vmsa.ds;
+    }
+
+    // Configure vTOM if requested.
+    if launch_state.vtom != 0 {
+        vmsa.vtom = launch_state.vtom;
+        vmsa.sev_features |= 2; // VTOM feature
+    }
+
+    Ok(())
+}
+
+pub fn launch_fw(launch_state: &GuestFwLaunchState) -> Result<(), SvsmError> {
+    prepare_fw_launch(launch_state)?;
+
     let cpu = this_cpu();
     let mut vmsa_ref = cpu.guest_vmsa_ref();
     let vmsa_pa = vmsa_ref.vmsa_phys().unwrap();
     let vmsa = vmsa_ref.vmsa();
 
-    config.initialize_guest_vmsa(vmsa)?;
+    initialize_guest_vmsa(vmsa, launch_state)?;
 
     log::info!("VMSA PA: {:#x}", vmsa_pa);
 

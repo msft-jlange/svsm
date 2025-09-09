@@ -11,7 +11,6 @@ pub mod snp;
 pub mod tdp;
 
 mod snp_fw;
-pub use snp_fw::SevFWMetaData;
 
 use capabilities::Caps;
 use native::{NativePlatform, NativeStage2Platform};
@@ -23,12 +22,12 @@ use core::fmt::Debug;
 use core::mem::MaybeUninit;
 
 use crate::address::{PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::shadow_stack::determine_cet_support_from_cpuid;
 use crate::cpu::tlb::{flush_tlb, TlbFlushScope};
 use crate::error::SvsmError;
+use crate::guest_fw::{GuestFwInfo, GuestFwLaunchState};
 use crate::hyperv;
 use crate::io::IOPort;
 use crate::types::PageSize;
@@ -93,17 +92,18 @@ pub trait SvsmPlatform: Sync {
     /// (for services not used by stage2).
     fn env_setup_svsm(&self) -> Result<(), SvsmError>;
 
-    /// Performs the necessary preparations for launching guest boot firmware.
-    fn prepare_fw(
+    /// Copies any platform-specific tables into guest firmware memory as
+    /// required.
+    fn copy_tables_to_fw(
         &self,
-        _config: &SvsmConfig<'_>,
-        _kernel_region: MemoryRegion<PhysAddr>,
+        _fw_info: &GuestFwInfo,
+        _kernel_region: &MemoryRegion<PhysAddr>,
     ) -> Result<(), SvsmError> {
         Ok(())
     }
 
     /// Launches guest boot firmware.
-    fn launch_fw(&self, _config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
+    fn launch_fw(&self, _launch_state: &GuestFwLaunchState) -> Result<(), SvsmError> {
         Ok(())
     }
 

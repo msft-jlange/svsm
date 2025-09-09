@@ -9,11 +9,10 @@ extern crate alloc;
 use crate::acpi::tables::ACPICPUInfo;
 use crate::address::PhysAddr;
 use crate::error::SvsmError;
+use crate::guest_fw::{GuestFwInfo, GuestFwLaunchState};
 use crate::igvm_params::IgvmParams;
-use crate::platform::SevFWMetaData;
 use crate::utils::MemoryRegion;
 use alloc::vec::Vec;
-use cpuarch::vmsa::VMSA;
 
 fn check_ovmf_regions(
     flash_regions: &[MemoryRegion<PhysAddr>],
@@ -97,8 +96,12 @@ impl<'a> SvsmConfig<'a> {
         self.igvm_params.debug_serial_port()
     }
 
-    pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
-        self.igvm_params.get_fw_metadata()
+    pub fn get_guest_fw_info(&self) -> (GuestFwInfo, GuestFwLaunchState) {
+        self.igvm_params.get_guest_fw_info()
+    }
+
+    pub fn get_prevalidated_ranges(&self) -> Option<Vec<MemoryRegion<PhysAddr>>> {
+        self.igvm_params.get_prevalidated_ranges()
     }
 
     pub fn get_fw_regions(
@@ -114,10 +117,6 @@ impl<'a> SvsmConfig<'a> {
 
     pub fn fw_in_low_memory(&self) -> bool {
         self.igvm_params.fw_in_low_memory()
-    }
-
-    pub fn initialize_guest_vmsa(&self, vmsa: &mut VMSA) -> Result<(), SvsmError> {
-        self.igvm_params.initialize_guest_vmsa(vmsa)
     }
 
     pub fn use_alternate_injection(&self) -> bool {

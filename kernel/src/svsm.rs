@@ -35,12 +35,13 @@ use svsm::debug::gdbstub::svsm_gdbstub::{debug_break, gdbstub_start};
 use svsm::debug::stacktrace::print_stack;
 use svsm::enable_shadow_stacks;
 use svsm::fs::{initialize_fs, populate_ram_fs};
+use svsm::guest_fw::prepare_fw;
 use svsm::hyperv::hyperv_setup;
 use svsm::igvm_params::IgvmBox;
 use svsm::kernel_region::new_kernel_region;
 use svsm::mm::alloc::{free_multiple_pages, memory_info, print_memory_info, root_mem_init};
 use svsm::mm::memory::init_memory_map;
-use svsm::mm::pagetable::{PageTable, paging_init};
+use svsm::mm::pagetable::{paging_init, PageTable};
 use svsm::mm::ro_after_init::make_ro_after_init;
 use svsm::mm::validate::init_valid_bitmap;
 use svsm::mm::virtualrange::virt_log_usage;
@@ -49,9 +50,7 @@ use svsm::platform;
 use svsm::platform::{init_capabilities, init_platform_type, SvsmPlatformCell, SVSM_PLATFORM};
 use svsm::sev::secrets_page::initialize_secrets_page;
 use svsm::sev::secrets_page_mut;
-use svsm::svsm_paging::{
-    enumerate_early_boot_regions, invalidate_early_boot_memory,
-};
+use svsm::svsm_paging::{enumerate_early_boot_regions, invalidate_early_boot_memory};
 use svsm::task::{schedule_init, start_kernel_task, KernelThreadStartInfo};
 use svsm::types::PAGE_SIZE;
 use svsm::utils::{MemoryRegion, ScopedRef};
@@ -386,8 +385,9 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
     invalidate_early_boot_memory(&**SVSM_PLATFORM, &config, &early_boot_regions)
         .expect("Failed to invalidate early boot memory");
 
-    if let Err(e) = SVSM_PLATFORM.prepare_fw(&config, kernel_region) {
-        panic!("Failed to prepare guest FW: {e:#?}");
+    let (fw_info, fw_launch_state) = config.get_guest_fw_info();
+    if let Err(e) = prepare_fw(&config, &fw_info, kernel_region) {
+        panic!("Failed to prepare guest FW state: {e:#?}");
     }
 
     #[cfg(feature = "attest")]
@@ -404,8 +404,10 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
 
     virt_log_usage();
 
-    if let Err(e) = SVSM_PLATFORM.launch_fw(&config) {
-        panic!("Failed to launch FW: {e:?}");
+    if config.should_launch_fw() {
+        if let Err(e) = SVSM_PLATFORM.launch_fw(&fw_launch_state) {
+            panic!("Failed to launch FW: {e:?}");
+        }
     }
 
     #[cfg(test)]

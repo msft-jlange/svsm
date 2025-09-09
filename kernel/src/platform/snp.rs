@@ -5,12 +5,9 @@
 // Author: Jon Lange <jlange@microsoft.com>
 
 use super::capabilities::Caps;
-use super::snp_fw::{
-    copy_tables_to_fw, launch_fw, prepare_fw_launch, print_fw_meta, validate_fw, validate_fw_memory,
-};
+use super::snp_fw::{copy_tables_to_fw, launch_fw};
 use super::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, Stage2Platform, SvsmPlatform};
 use crate::address::{Address, PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::console::init_svsm_console;
 use crate::cpu::cpuid::{cpuid_table, CpuidResult};
 use crate::cpu::percpu::{current_ghcb, this_cpu, PerCpu};
@@ -19,9 +16,9 @@ use crate::cpu::x86::{apic_enable, apic_initialize, apic_sw_enable};
 use crate::error::ApicError::Registration;
 use crate::error::SvsmError;
 use crate::greq::driver::guest_request_driver_init;
+use crate::guest_fw::{GuestFwInfo, GuestFwLaunchState};
 use crate::hyperv;
 use crate::io::IOPort;
-use crate::mm::memory::write_guest_memory_map;
 use crate::mm::{PerCPUPageMappingGuard, PAGE_SIZE, PAGE_SIZE_2M};
 use crate::sev::ghcb::GHCBIOSize;
 use crate::sev::msr_protocol::{
@@ -126,28 +123,16 @@ impl SvsmPlatform for SnpPlatform {
         Ok(())
     }
 
-    fn prepare_fw(
+    fn copy_tables_to_fw(
         &self,
-        config: &SvsmConfig<'_>,
-        kernel_region: MemoryRegion<PhysAddr>,
+        fw_info: &GuestFwInfo,
+        kernel_region: &MemoryRegion<PhysAddr>,
     ) -> Result<(), SvsmError> {
-        if let Some(fw_meta) = &config.get_fw_metadata() {
-            print_fw_meta(fw_meta);
-            validate_fw_memory(config, fw_meta, &kernel_region)?;
-            write_guest_memory_map(config)?;
-            copy_tables_to_fw(fw_meta, &kernel_region)?;
-            validate_fw(config, &kernel_region)?;
-            prepare_fw_launch(fw_meta)?;
-        }
-        Ok(())
+        copy_tables_to_fw(fw_info, kernel_region)
     }
 
-    fn launch_fw(&self, config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
-        if config.should_launch_fw() {
-            launch_fw(config)
-        } else {
-            Ok(())
-        }
+    fn launch_fw(&self, launch_state: &GuestFwLaunchState) -> Result<(), SvsmError> {
+        launch_fw(launch_state)
     }
 
     fn setup_percpu(&self, cpu: &PerCpu) -> Result<(), SvsmError> {

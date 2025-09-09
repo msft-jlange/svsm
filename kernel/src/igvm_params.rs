@@ -8,15 +8,14 @@ extern crate alloc;
 
 use crate::acpi::tables::{load_acpi_cpu_info, ACPICPUInfo, ACPITable};
 use crate::address::{Address, PhysAddr, VirtAddr};
-use crate::cpu::efer::EFERFlags;
 use crate::error::SvsmError;
+use crate::guest_fw::{GuestFwInfo, GuestFwLaunchState};
 use crate::mm::alloc::free_multiple_pages;
 use crate::mm::{GuestPtr, PerCPUPageMappingGuard, PAGE_SIZE};
-use crate::platform::{PageStateChangeOp, PageValidateOp, SevFWMetaData, SVSM_PLATFORM};
+use crate::platform::{PageStateChangeOp, PageValidateOp, SVSM_PLATFORM};
 use crate::types::PageSize;
 use crate::utils::{round_to_pages, MemoryRegion};
 use alloc::vec::Vec;
-use cpuarch::vmsa::VMSA;
 
 use bootlib::igvm_params::{IgvmGuestContext, IgvmParamBlock, IgvmParamPage};
 use bootlib::kernel_launch::LOWMEM_END;
@@ -280,21 +279,19 @@ impl IgvmParams<'_> {
         self.igvm_param_block.debug_serial_port
     }
 
-    pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
-        if !self.should_launch_fw() {
-            return None;
-        }
-
-        let mut fw_meta = SevFWMetaData::new();
+    pub fn get_guest_fw_info(&self) -> (GuestFwInfo, GuestFwLaunchState) {
+        let mut fw_info = GuestFwInfo::default();
+        let mut launch_state = GuestFwLaunchState::default();
 
         if self.igvm_param_block.firmware.caa_page != 0 {
-            fw_meta.caa_page = Some(PhysAddr::new(
+            fw_info.caa_page = Some(PhysAddr::new(
                 self.igvm_param_block.firmware.caa_page.try_into().unwrap(),
             ));
+            launch_state.caa_page = fw_info.caa_page;
         }
 
         if self.igvm_param_block.firmware.secrets_page != 0 {
-            fw_meta.secrets_page = Some(PhysAddr::new(
+            fw_info.secrets_page = Some(PhysAddr::new(
                 self.igvm_param_block
                     .firmware
                     .secrets_page
@@ -304,7 +301,7 @@ impl IgvmParams<'_> {
         }
 
         if self.igvm_param_block.firmware.cpuid_page != 0 {
-            fw_meta.cpuid_page = Some(PhysAddr::new(
+            fw_info.cpuid_page = Some(PhysAddr::new(
                 self.igvm_param_block
                     .firmware
                     .cpuid_page
@@ -313,19 +310,35 @@ impl IgvmParams<'_> {
             ));
         }
 
-        let preval_count = self.igvm_param_block.firmware.prevalidated_count as usize;
-        for preval in self
-            .igvm_param_block
-            .firmware
-            .prevalidated
-            .iter()
-            .take(preval_count)
-        {
-            let base = PhysAddr::from(preval.base as usize);
-            fw_meta.add_valid_mem(base, preval.size as usize);
+        if let Some(guest_context) = self.igvm_guest_context {
+            launch_state.context = Some(*guest_context);
         }
 
-        Some(fw_meta)
+        launch_state.vtom = self.igvm_param_block.vtom;
+
+        (fw_info, launch_state)
+    }
+
+    pub fn get_prevalidated_ranges(&self) -> Option<Vec<MemoryRegion<PhysAddr>>> {
+        let preval_count = self.igvm_param_block.firmware.prevalidated_count as usize;
+        if preval_count != 0 {
+            let mut ranges = Vec::<MemoryRegion<PhysAddr>>::new();
+
+            for preval in self
+                .igvm_param_block
+                .firmware
+                .prevalidated
+                .iter()
+                .take(preval_count)
+            {
+                let base = PhysAddr::from(preval.base as usize);
+                ranges.push(MemoryRegion::new(base, preval.size as usize));
+            }
+
+            Some(ranges)
+        } else {
+            None
+        }
     }
 
     pub fn get_fw_regions(&self) -> Vec<MemoryRegion<PhysAddr>> {
@@ -379,73 +392,6 @@ impl IgvmParams<'_> {
 
     pub fn fw_in_low_memory(&self) -> bool {
         self.igvm_param_block.firmware.in_low_memory != 0
-    }
-
-    pub fn initialize_guest_vmsa(&self, vmsa: &mut VMSA) -> Result<(), SvsmError> {
-        let Some(guest_context) = self.igvm_guest_context else {
-            return Ok(());
-        };
-
-        // Copy the specified registers into the VMSA.
-        vmsa.cr0 = guest_context.cr0;
-        vmsa.cr3 = guest_context.cr3;
-        vmsa.cr4 = guest_context.cr4;
-        vmsa.efer = guest_context.efer;
-        vmsa.rip = guest_context.rip;
-        vmsa.rax = guest_context.rax;
-        vmsa.rcx = guest_context.rcx;
-        vmsa.rdx = guest_context.rdx;
-        vmsa.rbx = guest_context.rbx;
-        vmsa.rsp = guest_context.rsp;
-        vmsa.rbp = guest_context.rbp;
-        vmsa.rsi = guest_context.rsi;
-        vmsa.rdi = guest_context.rdi;
-        vmsa.r8 = guest_context.r8;
-        vmsa.r9 = guest_context.r9;
-        vmsa.r10 = guest_context.r10;
-        vmsa.r11 = guest_context.r11;
-        vmsa.r12 = guest_context.r12;
-        vmsa.r13 = guest_context.r13;
-        vmsa.r14 = guest_context.r14;
-        vmsa.r15 = guest_context.r15;
-        vmsa.gdt.base = guest_context.gdt_base;
-        vmsa.gdt.limit = guest_context.gdt_limit;
-
-        // If a non-zero code selector is specified, then set the code
-        // segment attributes based on EFER.LMA.
-        if guest_context.code_selector != 0 {
-            vmsa.cs.selector = guest_context.code_selector;
-            let efer_lma = EFERFlags::LMA;
-            if (vmsa.efer & efer_lma.bits()) != 0 {
-                vmsa.cs.flags = 0xA9B;
-            } else {
-                vmsa.cs.flags = 0xC9B;
-                vmsa.cs.limit = 0xFFFFFFFF;
-            }
-        }
-
-        let efer_svme = EFERFlags::SVME;
-        vmsa.efer &= !efer_svme.bits();
-
-        // If a non-zero data selector is specified, then modify the data
-        // segment attributes to be compatible with protected mode.
-        if guest_context.data_selector != 0 {
-            vmsa.ds.selector = guest_context.data_selector;
-            vmsa.ds.flags = 0xA93;
-            vmsa.ds.limit = 0xFFFFFFFF;
-            vmsa.ss = vmsa.ds;
-            vmsa.es = vmsa.ds;
-            vmsa.fs = vmsa.ds;
-            vmsa.gs = vmsa.ds;
-        }
-
-        // Configure vTOM if requested.
-        if self.igvm_param_block.vtom != 0 {
-            vmsa.vtom = self.igvm_param_block.vtom;
-            vmsa.sev_features |= 2; // VTOM feature
-        }
-
-        Ok(())
     }
 
     pub fn get_vtom(&self) -> u64 {

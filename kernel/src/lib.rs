@@ -25,6 +25,7 @@ pub mod error;
 pub mod fs;
 pub mod fw_cfg;
 pub mod greq;
+pub mod guest_fw;
 pub mod hyperv;
 pub mod igvm_params;
 pub mod insn_decode;
