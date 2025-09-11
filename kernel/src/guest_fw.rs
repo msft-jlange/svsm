@@ -9,6 +9,7 @@ extern crate alloc;
 use crate::address::PhysAddr;
 use crate::config::SvsmConfig;
 use crate::error::SvsmError;
+use crate::locking::RWLock;
 use crate::mm::memory::write_guest_memory_map;
 use crate::mm::PerCPUPageMappingGuard;
 use crate::platform::{PageStateChangeOp, SVSM_PLATFORM};
@@ -16,8 +17,11 @@ use crate::sev::{pvalidate, rmp_adjust, PvalidateOp, RMPFlags};
 use crate::types::{PageSize, PAGE_SIZE};
 use crate::utils::{zero_mem_region, MemoryRegion};
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bootlib::igvm_params::IgvmGuestContext;
+
+pub static GUEST_FW_LAUNCH_STATE: RWLock<Option<Arc<GuestFwLaunchState>>> = RWLock::new(None);
 
 #[derive(Clone, Debug, Default)]
 pub struct GuestFwInfo {
@@ -26,7 +30,7 @@ pub struct GuestFwInfo {
     pub caa_page: Option<PhysAddr>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct GuestFwLaunchState {
     pub caa_page: Option<PhysAddr>,
     pub vtom: u64,
@@ -207,4 +211,17 @@ pub fn prepare_fw(
     validate_fw(config, &kernel_region)?;
 
     Ok(())
+}
+
+pub fn capture_guest_fw_launch_state(launch_state: &GuestFwLaunchState) {
+    let mut state = GUEST_FW_LAUNCH_STATE.lock_write();
+    *state = Some(Arc::new(launch_state.clone()));
+}
+
+pub fn get_guest_fw_launch_state() -> Option<Arc<GuestFwLaunchState>> {
+    GUEST_FW_LAUNCH_STATE.lock_read().as_ref().map(|s| s.clone())
+}
+
+pub fn clear_guest_fw_launch_state() {
+    *GUEST_FW_LAUNCH_STATE.lock_write() = None;
 }
