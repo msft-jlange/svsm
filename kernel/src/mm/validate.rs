@@ -5,8 +5,8 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use crate::address::{Address, PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::error::SvsmError;
+use crate::igvm_params::IgvmParams;
 use crate::locking::SpinLock;
 use crate::mm::pagetable::PageFrame;
 use crate::mm::{virt_to_frame, virt_to_phys, PageBox};
@@ -216,10 +216,10 @@ impl ValidBitmap {
 /// The caller is required to ensure the safety of the virtual address range.
 pub unsafe fn validate_mapped_region(
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
     vregion: MemoryRegion<VirtAddr>,
 ) -> Result<(), SvsmError> {
-    if config.page_state_change_required() {
+    if igvm_params.page_state_change_required() {
         // Loop over the virtual address range to determine the physical
         // address ranges that must be changed to private pages.
         let mut paddr_len: usize = 0;
