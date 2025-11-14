@@ -23,13 +23,13 @@ use core::fmt::Debug;
 use core::mem::MaybeUninit;
 
 use crate::address::{PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::shadow_stack::determine_cet_support_from_cpuid;
 use crate::cpu::tlb::{flush_tlb, TlbFlushScope};
 use crate::error::SvsmError;
 use crate::hyperv;
+use crate::igvm_params::IgvmParams;
 use crate::io::IOPort;
 use crate::types::PageSize;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
@@ -95,14 +95,14 @@ pub trait SvsmPlatform: Sync {
     /// Performs the necessary preparations for launching guest boot firmware.
     fn prepare_fw(
         &self,
-        _config: &SvsmConfig<'_>,
+        _igvm_params: &IgvmParams<'_>,
         _kernel_region: MemoryRegion<PhysAddr>,
     ) -> Result<(), SvsmError> {
         Ok(())
     }
 
     /// Launches guest boot firmware.
-    fn launch_fw(&self, _config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
+    fn launch_fw(&self, _igvm_params: &IgvmParams<'_>) -> Result<(), SvsmError> {
         Ok(())
     }
 

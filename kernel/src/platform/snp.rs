@@ -10,7 +10,6 @@ use super::snp_fw::{
 };
 use super::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, SvsmPlatform};
 use crate::address::{Address, PhysAddr, VirtAddr};
-use crate::config::SvsmConfig;
 use crate::console::init_svsm_console;
 use crate::cpu::cpuid::{cpuid_table, CpuidResult};
 use crate::cpu::percpu::{current_ghcb, this_cpu, PerCpu};
@@ -20,6 +19,7 @@ use crate::error::ApicError::Registration;
 use crate::error::SvsmError;
 use crate::greq::driver::guest_request_driver_init;
 use crate::hyperv;
+use crate::igvm_params::IgvmParams;
 use crate::io::IOPort;
 use crate::mm::memory::write_guest_memory_map;
 use crate::mm::{PerCPUPageMappingGuard, PAGE_SIZE, PAGE_SIZE_2M};
@@ -127,23 +127,23 @@ impl SvsmPlatform for SnpPlatform {
 
     fn prepare_fw(
         &self,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
         kernel_region: MemoryRegion<PhysAddr>,
     ) -> Result<(), SvsmError> {
-        if let Some(fw_meta) = &config.get_fw_metadata() {
+        if let Some(fw_meta) = &igvm_params.get_fw_metadata() {
             print_fw_meta(fw_meta);
-            validate_fw_memory(config, fw_meta, &kernel_region)?;
-            write_guest_memory_map(config)?;
+            validate_fw_memory(igvm_params, fw_meta, &kernel_region)?;
+            write_guest_memory_map(igvm_params)?;
             copy_tables_to_fw(fw_meta, &kernel_region)?;
-            validate_fw(config, &kernel_region)?;
+            validate_fw(igvm_params, &kernel_region)?;
             prepare_fw_launch(fw_meta)?;
         }
         Ok(())
     }
 
-    fn launch_fw(&self, config: &SvsmConfig<'_>) -> Result<(), SvsmError> {
-        if config.should_launch_fw() {
-            launch_fw(config)
+    fn launch_fw(&self, igvm_params: &IgvmParams<'_>) -> Result<(), SvsmError> {
+        if igvm_params.should_launch_fw() {
+            launch_fw(igvm_params)
         } else {
             Ok(())
         }

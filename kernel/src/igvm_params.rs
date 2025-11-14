@@ -270,13 +270,13 @@ impl IgvmParams<'_> {
         Ok(())
     }
 
-    pub fn load_cpu_info(&self) -> Result<Option<Vec<ACPICPUInfo>>, SvsmError> {
+    pub fn load_cpu_info(&self) -> Result<Vec<ACPICPUInfo>, SvsmError> {
         match self.igvm_madt {
             Some(madt_data) => {
                 let madt = ACPITable::new(madt_data)?;
-                Ok(Some(load_acpi_cpu_info(&madt)?))
+                Ok(load_acpi_cpu_info(&madt)?)
             }
-            None => Ok(None),
+            None => Err(SvsmError::Igvm),
         }
     }
 
@@ -336,7 +336,7 @@ impl IgvmParams<'_> {
         Some(fw_meta)
     }
 
-    pub fn get_fw_regions(&self) -> Vec<MemoryRegion<PhysAddr>> {
+    fn get_fw_region_list(&self) -> Vec<MemoryRegion<PhysAddr>> {
         assert!(self.should_launch_fw());
 
         let mut regions = Vec::new();
@@ -383,6 +383,55 @@ impl IgvmParams<'_> {
         }
 
         regions
+    }
+
+    fn check_ovmf_regions(
+        flash_regions: &[MemoryRegion<PhysAddr>],
+        kernel_region: &MemoryRegion<PhysAddr>,
+    ) {
+        let flash_range = {
+            let one_gib = 1024 * 1024 * 1024usize;
+            let start = PhysAddr::from(3 * one_gib);
+            MemoryRegion::new(start, one_gib)
+        };
+
+        // Sanity-check flash regions.
+        for region in flash_regions.iter() {
+            // Make sure that the regions are between 3GiB and 4GiB.
+            if !region.overlap(&flash_range) {
+                panic!("flash region in unexpected region");
+            }
+
+            // Make sure that no regions overlap with the kernel.
+            if region.overlap(kernel_region) {
+                panic!("flash region overlaps with kernel");
+            }
+        }
+
+        // Make sure that regions don't overlap.
+        for (i, outer) in flash_regions.iter().enumerate() {
+            for inner in flash_regions[..i].iter() {
+                if outer.overlap(inner) {
+                    panic!("flash regions overlap");
+                }
+            }
+            // Make sure that one regions ends at 4GiB.
+            let one_region_ends_at_4gib = flash_regions
+                .iter()
+                .any(|region| region.end() == flash_range.end());
+            assert!(one_region_ends_at_4gib);
+        }
+    }
+
+    pub fn get_fw_regions(
+        &self,
+        kernel_region: &MemoryRegion<PhysAddr>,
+    ) -> Vec<MemoryRegion<PhysAddr>> {
+        let flash_regions = self.get_fw_region_list();
+        if !self.fw_in_low_memory() {
+            Self::check_ovmf_regions(&flash_regions, kernel_region);
+        }
+        flash_regions
     }
 
     pub fn fw_in_low_memory(&self) -> bool {

@@ -17,7 +17,6 @@ use cpuarch::snp_cpuid::SnpCpuidTable;
 use svsm::address::{Address, PhysAddr, VirtAddr};
 #[cfg(feature = "attest")]
 use svsm::attest::AttestationDriver;
-use svsm::config::SvsmConfig;
 use svsm::console::install_console_logger;
 use svsm::cpu::control_regs::{cr0_init, cr4_init};
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table};
@@ -328,26 +327,26 @@ pub fn svsm_main(cpu_index: usize) {
         panic!("Launch VTOM does not match VTOM from IGVM parameters");
     }
 
-    let config = SvsmConfig::new(*SVSM_PLATFORM, igvm_params);
-
-    init_memory_map(&config, &LAUNCH_INFO).expect("Failed to init guest memory map");
+    init_memory_map(&igvm_params, &LAUNCH_INFO).expect("Failed to init guest memory map");
 
     populate_ram_fs(LAUNCH_INFO.kernel_fs_start, LAUNCH_INFO.kernel_fs_end)
         .expect("Failed to unpack FS archive");
 
     init_capabilities();
 
-    let cpus = config.load_cpu_info().expect("Failed to load ACPI tables");
+    let cpus = igvm_params
+        .load_cpu_info()
+        .expect("Failed to load ACPI tables");
 
     start_secondary_cpus(&**SVSM_PLATFORM, &cpus);
 
     // Make ro_after_init section read-only
     make_ro_after_init().expect("Failed to make ro_after_init region read-only");
 
-    invalidate_early_boot_memory(&**SVSM_PLATFORM, &config, launch_info)
+    invalidate_early_boot_memory(&**SVSM_PLATFORM, &igvm_params, launch_info)
         .expect("Failed to invalidate early boot memory");
 
-    if let Err(e) = SVSM_PLATFORM.prepare_fw(&config, new_kernel_region(&LAUNCH_INFO)) {
+    if let Err(e) = SVSM_PLATFORM.prepare_fw(&igvm_params, new_kernel_region(&LAUNCH_INFO)) {
         panic!("Failed to prepare guest FW: {e:#?}");
     }
 
@@ -365,16 +364,16 @@ pub fn svsm_main(cpu_index: usize) {
 
     virt_log_usage();
 
-    if let Err(e) = SVSM_PLATFORM.launch_fw(&config) {
+    if let Err(e) = SVSM_PLATFORM.launch_fw(&igvm_params) {
         panic!("Failed to launch FW: {e:?}");
     }
 
     #[cfg(test)]
     {
-        if config.has_qemu_testdev() {
+        if igvm_params.has_qemu_testdev() {
             crate::testutils::set_has_qemu_testdev();
         }
-        if config.has_test_iorequests() {
+        if igvm_params.has_test_iorequests() {
             crate::testutils::set_has_test_iorequests();
         }
         crate::test_main();

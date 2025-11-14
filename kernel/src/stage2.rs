@@ -21,7 +21,6 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use cpuarch::snp_cpuid::SnpCpuidTable;
 use elf::ElfError;
 use svsm::address::{Address, PhysAddr, VirtAddr};
-use svsm::config::SvsmConfig;
 use svsm::console::install_console_logger;
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table};
 use svsm::cpu::flush_tlb_percpu;
@@ -106,7 +105,7 @@ unsafe fn shutdown_percpu() {
 // SAFETY: the caller must guarantee that the IDT specified here will remain
 // in scope until a new IDT is loaded.
 unsafe fn setup_env(
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
     platform: &mut dyn SvsmPlatform,
     launch_info: &Stage2LaunchInfo,
     idt: &mut IDT<'_>,
@@ -117,7 +116,7 @@ unsafe fn setup_env(
         early_idt_init_no_ghcb(idt);
     }
 
-    let debug_serial_port = config.debug_serial_port();
+    let debug_serial_port = igvm_params.debug_serial_port();
     install_console_logger("Stage2").expect("Console logger already initialized");
     platform
         .env_setup(debug_serial_port, launch_info.vtom.try_into().unwrap())
@@ -197,7 +196,7 @@ unsafe fn setup_env(
 /// The caller is required to ensure the safety of the virtual address range.
 unsafe fn map_and_validate(
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
     vregion: MemoryRegion<VirtAddr>,
     paddr: PhysAddr,
 ) -> Result<(), SvsmError> {
@@ -209,7 +208,7 @@ unsafe fn map_and_validate(
     let mut pgtbl = this_cpu().get_pgtable();
     pgtbl.map_region(vregion, paddr, flags)?;
 
-    if config.page_state_change_required() {
+    if igvm_params.page_state_change_required() {
         platform.page_state_change(
             MemoryRegion::new(paddr, vregion.len()),
             PageSize::Huge,
@@ -232,15 +231,6 @@ fn check_launch_info(launch_info: &KernelLaunchInfo) {
     assert!(is_aligned(offset, align));
 }
 
-fn get_svsm_config(
-    launch_info: &Stage2LaunchInfo,
-    platform: &dyn SvsmPlatform,
-) -> Result<SvsmConfig<'static>, SvsmError> {
-    let igvm_params = IgvmParams::new(VirtAddr::from(launch_info.igvm_params as u64))?;
-
-    Ok(SvsmConfig::new(platform, igvm_params))
-}
-
 /// Loads a single ELF segment and returns its virtual memory region.
 /// # Safety
 /// The caller is required to supply an appropriate virtual address for this
@@ -249,7 +239,7 @@ unsafe fn load_elf_segment(
     segment: elf::Elf64ImageLoadSegment<'_>,
     paddr: PhysAddr,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<MemoryRegion<VirtAddr>, SvsmError> {
     // Find the segment's bounds
     let segment_start = VirtAddr::from(segment.vaddr_range.vaddr_begin);
@@ -269,7 +259,7 @@ unsafe fn load_elf_segment(
     // SAFETY: the caller has verified the safety of this virtual address
     // region.
     unsafe {
-        map_and_validate(platform, config, segment_region, paddr)?;
+        map_and_validate(platform, igvm_params, segment_region, paddr)?;
     }
 
     // Copy the segment contents and pad with zeroes
@@ -291,7 +281,7 @@ fn load_kernel_elf(
     launch_info: &Stage2LaunchInfo,
     loaded_phys: &mut MemoryRegion<PhysAddr>,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<(VirtAddr, MemoryRegion<VirtAddr>), SvsmError> {
     // Find the bounds of the kernel ELF and load it into the ELF parser
     let elf_start = PhysAddr::from(launch_info.kernel_elf_start as u64);
@@ -317,7 +307,8 @@ fn load_kernel_elf(
         // SAFETY: the virtual address is calculated based on the base address
         // of the image and the previously loaded segments, so it is correct
         // for use.
-        let region = unsafe { load_elf_segment(segment, loaded_phys.end(), platform, config)? };
+        let region =
+            unsafe { load_elf_segment(segment, loaded_phys.end(), platform, igvm_params)? };
         // Remember the mapping range's lower and upper bounds to pass it on
         // the kernel later. Note that the segments are being iterated over
         // here in increasing load order.
@@ -365,19 +356,18 @@ fn load_kernel_elf(
 /// kernel virtual region.
 unsafe fn load_igvm_params(
     launch_info: &Stage2LaunchInfo,
-    params: &IgvmParams<'_>,
     loaded_kernel_vregion: &MemoryRegion<VirtAddr>,
     loaded_kernel_pregion: &MemoryRegion<PhysAddr>,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<(MemoryRegion<VirtAddr>, MemoryRegion<PhysAddr>), SvsmError> {
     // Map and validate destination region
-    let igvm_vregion = MemoryRegion::new(loaded_kernel_vregion.end(), params.size());
-    let igvm_pregion = MemoryRegion::new(loaded_kernel_pregion.end(), params.size());
+    let igvm_vregion = MemoryRegion::new(loaded_kernel_vregion.end(), igvm_params.size());
+    let igvm_pregion = MemoryRegion::new(loaded_kernel_pregion.end(), igvm_params.size());
     // SAFETY: the virtual address region was computed not to overlap the
     // kernel image.
     unsafe {
-        map_and_validate(platform, config, igvm_vregion, igvm_pregion.start())?;
+        map_and_validate(platform, igvm_params, igvm_vregion, igvm_pregion.start())?;
     }
 
     // Copy the contents over
@@ -410,7 +400,7 @@ fn prepare_heap(
     loaded_kernel_pregion: MemoryRegion<PhysAddr>,
     loaded_kernel_vregion: MemoryRegion<VirtAddr>,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<(MemoryRegion<VirtAddr>, MemoryRegion<PhysAddr>), SvsmError> {
     // Heap starts after kernel
     let heap_pstart = loaded_kernel_pregion.end();
@@ -420,7 +410,7 @@ fn prepare_heap(
     let heap_size = kernel_region
         .end()
         .checked_sub(heap_pstart.into())
-        .and_then(|r| r.checked_sub(config.reserved_kernel_area_size()))
+        .and_then(|r| r.checked_sub(igvm_params.reserved_kernel_area_size()))
         .expect("Insufficient physical space for kernel image")
         .into();
     let heap_pregion = MemoryRegion::new(heap_pstart, heap_size);
@@ -429,7 +419,7 @@ fn prepare_heap(
     // SAFETY: the virtual address range was computed so it is within the valid
     // region and does not collide with the kernel.
     unsafe {
-        map_and_validate(platform, config, heap_vregion, heap_pregion.start())?;
+        map_and_validate(platform, igvm_params, heap_vregion, heap_pregion.start())?;
     }
 
     Ok((heap_vregion, heap_pregion))
@@ -443,7 +433,8 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     let mut platform_cell = SvsmPlatformCell::new(true);
     let platform = platform_cell.platform_mut();
 
-    let config = get_svsm_config(launch_info, platform).expect("Failed to get SVSM configuration");
+    let igvm_params = IgvmParams::new(VirtAddr::from(launch_info.igvm_params as u64))
+        .expect("Failed to get IGVM parameters");
 
     // Set up space for an early IDT.  This will remain in scope as long as
     // stage2 is in memory.
@@ -453,11 +444,11 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // SAFETY: the IDT here will remain in scope until the full IDT is
     // initialized later, and thus can safely be used as the early IDT.
     unsafe {
-        setup_env(&config, platform, launch_info, &mut idt);
+        setup_env(&igvm_params, platform, launch_info, &mut idt);
     }
 
     // Get the available physical memory region for the kernel
-    let kernel_region = config
+    let kernel_region = igvm_params
         .find_kernel_region()
         .expect("Failed to find memory region for SVSM kernel");
 
@@ -469,9 +460,13 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     let mut loaded_kernel_pregion = MemoryRegion::new(kernel_region.start(), 0);
 
     // Load first the kernel ELF and update the loaded physical region
-    let (kernel_entry, mut loaded_kernel_vregion) =
-        load_kernel_elf(launch_info, &mut loaded_kernel_pregion, platform, &config)
-            .expect("Failed to load kernel ELF");
+    let (kernel_entry, mut loaded_kernel_vregion) = load_kernel_elf(
+        launch_info,
+        &mut loaded_kernel_pregion,
+        platform,
+        &igvm_params,
+    )
+    .expect("Failed to load kernel ELF");
 
     // Load the IGVM params, if present. Update loaded region accordingly.
     // SAFETY: The loaded kernel region was correctly calculated above and
@@ -479,11 +474,10 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     let (igvm_vregion, igvm_pregion) = unsafe {
         load_igvm_params(
             launch_info,
-            config.get_igvm_params(),
             &loaded_kernel_vregion,
             &loaded_kernel_pregion,
             platform,
-            &config,
+            &igvm_params,
         )
     }
     .expect("Failed to load IGVM params");
@@ -498,14 +492,14 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         loaded_kernel_pregion,
         loaded_kernel_vregion,
         platform,
-        &config,
+        &igvm_params,
     )
     .expect("Failed to map and validate heap");
 
     // Determine whether use of interrupts on the SVSM should be suppressed.
     // This is required when running SNP under KVM/QEMU.
     let suppress_svsm_interrupts = match platform_type {
-        SvsmPlatformType::Snp => config.suppress_svsm_interrupts_on_snp(),
+        SvsmPlatformType::Snp => igvm_params.suppress_svsm_interrupts_on_snp(),
         _ => false,
     };
 
@@ -531,8 +525,8 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         igvm_params_phys_addr: u64::from(igvm_pregion.start()),
         igvm_params_virt_addr: u64::from(igvm_vregion.start()),
         vtom: launch_info.vtom,
-        debug_serial_port: config.debug_serial_port(),
-        use_alternate_injection: config.use_alternate_injection(),
+        debug_serial_port: igvm_params.debug_serial_port(),
+        use_alternate_injection: igvm_params.use_alternate_injection(),
         suppress_svsm_interrupts,
         platform_type,
     };
