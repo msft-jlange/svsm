@@ -23,7 +23,6 @@ use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
 use elf::ElfError;
 use svsm::address::{Address, PhysAddr, VirtAddr};
-use svsm::config::SvsmConfig;
 use svsm::console::install_console_logger;
 use svsm::cpu::cpuid::{dump_cpuid_table, register_cpuid_table};
 use svsm::cpu::flush_tlb_percpu;
@@ -121,7 +120,7 @@ impl KernelHeap {
         vaddr: VirtAddr,
         page_tables: &mut KernelPageTables<'_>,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(), SvsmError> {
         // Map the heap physical memory span at the requested address in the
         // kernel page tables.  All memory has already been validated, so only
@@ -135,7 +134,7 @@ impl KernelHeap {
                 flags,
                 self,
                 platform,
-                config,
+                igvm_params,
             )?;
         }
 
@@ -149,19 +148,19 @@ impl KernelHeap {
         &mut self,
         size: usize,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(VirtAddr, PhysAddr), SvsmError> {
         let page_count = round_to_pages(size);
-        self.allocate_pages(page_count, platform, config)
+        self.allocate_pages(page_count, platform, igvm_params)
     }
 
     pub fn allocate_zeroed(
         &mut self,
         size: usize,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(VirtAddr, PhysAddr), SvsmError> {
-        let (vaddr, paddr) = self.allocate(size, platform, config)?;
+        let (vaddr, paddr) = self.allocate(size, platform, igvm_params)?;
         // SAFETY: the virtual address just allocated is known to map a new
         // allocation of the specified size, so it can be accessed for
         // zeroing.
@@ -175,7 +174,7 @@ impl KernelHeap {
         &mut self,
         page_count: usize,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(VirtAddr, PhysAddr), SvsmError> {
         // Verify that this allocation will not overflow the heap.
         let next_free = self.next_free + page_count;
@@ -198,7 +197,7 @@ impl KernelHeap {
         unsafe {
             validate_mapped_region(
                 platform,
-                config,
+                igvm_params,
                 MemoryRegion::new(virt_addr, page_count * PAGE_SIZE),
             )?;
         }
@@ -254,7 +253,7 @@ impl KernelPageTables<'_> {
         flags: PTEntryFlags,
         kernel_heap: &mut KernelHeap,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(), SvsmError> {
         // The virtual address must fall within the first 1 GB of the kernel
         // address range.
@@ -289,7 +288,7 @@ impl KernelPageTables<'_> {
                 // If the entry is not present, it must be empty.
                 assert_eq!(entry.raw(), 0);
                 let (pt_vaddr, pt_paddr) =
-                    kernel_heap.allocate_zeroed(PAGE_SIZE, platform, config)?;
+                    kernel_heap.allocate_zeroed(PAGE_SIZE, platform, igvm_params)?;
                 let pxe_flags =
                     PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::ACCESSED;
                 entry.set_unrestricted(make_private_address(pt_paddr), pxe_flags);
@@ -321,7 +320,7 @@ impl KernelPageTables<'_> {
         flags: PTEntryFlags,
         kernel_heap: &mut KernelHeap,
         platform: &dyn SvsmPlatform,
-        config: &SvsmConfig<'_>,
+        igvm_params: &IgvmParams<'_>,
     ) -> Result<(), SvsmError> {
         // Loop over each page in the region and map it into the page tables.
         for addr in vregion.iter_pages(PageSize::Regular) {
@@ -332,11 +331,11 @@ impl KernelPageTables<'_> {
                 flags,
                 kernel_heap,
                 platform,
-                config,
+                igvm_params,
             )?;
         }
 
-        if config.page_state_change_required() {
+        if igvm_params.page_state_change_required() {
             platform.page_state_change(
                 MemoryRegion::new(phys_addr, vregion.len()),
                 PageSize::Huge,
@@ -359,12 +358,12 @@ impl KernelPageTables<'_> {
 fn setup_kernel_page_tables<'a>(
     heap: &mut KernelHeap,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<KernelPageTables<'a>, SvsmError> {
     // Allocate a new page from the kernel heap to use as the paging root for
     // the kernel.
     let (paging_root_vaddr, paging_root_paddr) =
-        heap.allocate_zeroed(PAGE_SIZE, platform, config)?;
+        heap.allocate_zeroed(PAGE_SIZE, platform, igvm_params)?;
 
     // SAFETY: the allocated virtual address is known to be usable as a page
     // table page.
@@ -380,7 +379,7 @@ fn setup_kernel_page_tables<'a>(
 
     // Allocate a new page to use as the page directory table page for the
     // kernel address space.
-    let (pdpt_vaddr, pdpt_paddr) = heap.allocate_zeroed(PAGE_SIZE, platform, config)?;
+    let (pdpt_vaddr, pdpt_paddr) = heap.allocate_zeroed(PAGE_SIZE, platform, igvm_params)?;
     // SAFETY: the allocated virtual address is known to be usable as a page
     // table page.
     let mut pdpt = unsafe { KernelPageTablePage::new(pdpt_vaddr) };
@@ -405,7 +404,7 @@ fn setup_kernel_page_tables<'a>(
     // Allocate a new page to use as a page directory table page.  This will
     // span 1 GB of address space, which is the maximum that will ever be
     // addressible during stage 2 execution.
-    let (pdt_vaddr, pdt_paddr) = heap.allocate_zeroed(PAGE_SIZE, platform, config)?;
+    let (pdt_vaddr, pdt_paddr) = heap.allocate_zeroed(PAGE_SIZE, platform, igvm_params)?;
     // SAFETY: the allocated virtual address is known to be usable as a page
     // table page.
     let pdt = unsafe { KernelPageTablePage::new(pdt_vaddr) };
@@ -479,7 +478,7 @@ unsafe fn shutdown_percpu() {
 // SAFETY: the caller must guarantee that the IDT specified here will remain
 // in scope until a new IDT is loaded.
 unsafe fn setup_env(
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
     platform: &mut dyn SvsmPlatform,
     launch_info: &Stage2LaunchInfo,
     cpuid_vaddr: Option<VirtAddr>,
@@ -491,7 +490,7 @@ unsafe fn setup_env(
         early_idt_init_no_ghcb(idt);
     }
 
-    let debug_serial_port = config.debug_serial_port();
+    let debug_serial_port = igvm_params.debug_serial_port();
     install_console_logger("Stage2").expect("Console logger already initialized");
     platform
         .env_setup(debug_serial_port, launch_info.vtom.try_into().unwrap())
@@ -564,9 +563,9 @@ unsafe fn copy_page_to_kernel(
     src_vaddr: Option<VirtAddr>,
     kernel_heap: &mut KernelHeap,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<VirtAddr, SvsmError> {
-    let (dst_vaddr, _) = kernel_heap.allocate(PAGE_SIZE, platform, config)?;
+    let (dst_vaddr, _) = kernel_heap.allocate(PAGE_SIZE, platform, igvm_params)?;
     if let Some(vaddr) = src_vaddr {
         // SAFETY: the caller takes responsibility for the correctness of the
         // source address, and the destination address is known to be correct
@@ -608,7 +607,7 @@ fn load_elf_segment(
     page_tables: &mut KernelPageTables<'_>,
     kernel_heap: &mut KernelHeap,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<MemoryRegion<VirtAddr>, SvsmError> {
     // Find the segment's bounds
     let segment_start = VirtAddr::from(segment.vaddr_range.vaddr_begin);
@@ -635,7 +634,14 @@ fn load_elf_segment(
     };
 
     // Map and validate the segment at the next contiguous physical address
-    page_tables.map_and_validate(segment_region, paddr, flags, kernel_heap, platform, config)?;
+    page_tables.map_and_validate(
+        segment_region,
+        paddr,
+        flags,
+        kernel_heap,
+        platform,
+        igvm_params,
+    )?;
 
     // Copy the segment contents and pad with zeroes
     // SAFETY: the call to map_and_validate above will prove the correctness of
@@ -687,7 +693,7 @@ fn load_kernel_elf(
     page_tables: &mut KernelPageTables<'_>,
     kernel_heap: &mut KernelHeap,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<(VirtAddr, MemoryRegion<VirtAddr>), SvsmError> {
     let vaddr_alloc_info = elf.image_load_vaddr_alloc_info();
     let vaddr_alloc_base = vaddr_alloc_info.range.vaddr_begin;
@@ -708,7 +714,7 @@ fn load_kernel_elf(
             page_tables,
             kernel_heap,
             platform,
-            config,
+            igvm_params,
         )?;
         // Remember the mapping range's lower and upper bounds to pass it on
         // the kernel later. Note that the segments are being iterated over
@@ -760,14 +766,13 @@ fn load_kernel_elf(
 fn load_igvm_params(
     kernel_heap: &mut KernelHeap,
     platform: &dyn SvsmPlatform,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
     launch_info: &Stage2LaunchInfo,
 ) -> Result<VirtAddr, SvsmError> {
-    let params = config.get_igvm_params();
-    let params_size = params.size();
+    let params_size = igvm_params.size();
 
     // Allocate space in the kernel area to hold the parameters.
-    let (vaddr, _) = kernel_heap.allocate(params_size, platform, config)?;
+    let (vaddr, _) = kernel_heap.allocate(params_size, platform, igvm_params)?;
 
     // Copy the contents over
     let src_addr = VirtAddr::from(launch_info.igvm_params as u64);
@@ -796,7 +801,7 @@ fn load_igvm_params(
 fn prepare_heap(
     kernel_region: MemoryRegion<PhysAddr>,
     kernel_page_count: usize,
-    config: &SvsmConfig<'_>,
+    igvm_params: &IgvmParams<'_>,
 ) -> Result<KernelHeap, SvsmError> {
     let kernel_size = kernel_page_count * PAGE_SIZE;
     let heap_pstart = kernel_region.start() + kernel_size;
@@ -809,7 +814,7 @@ fn prepare_heap(
         .into();
 
     let heap_pregion = MemoryRegion::new(heap_pstart + kernel_size, heap_size);
-    let heap = KernelHeap::create(heap_pregion, config.vmsa_in_kernel_range());
+    let heap = KernelHeap::create(heap_pregion, igvm_params.vmsa_in_kernel_range());
     let heap_vregion = MemoryRegion::new(heap.local_virt_base, heap_size);
 
     // Map the heap region into the page tables but do not validate it.
@@ -833,7 +838,6 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // SAFETY: the address in the launch info is known to be correct.
     let igvm_params = unsafe { IgvmParams::new(VirtAddr::from(launch_info.igvm_params as u64)) }
         .expect("Failed to get IGVM parameters");
-    let config = SvsmConfig::new(&igvm_params);
 
     // Set up space for an early IDT.  This will remain in scope as long as
     // stage2 is in memory.
@@ -846,11 +850,11 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // SAFETY: the IDT here will remain in scope until the full IDT is
     // initialized later, and thus can safely be used as the early IDT.
     unsafe {
-        setup_env(&config, platform, launch_info, cpuid_page, &mut idt);
+        setup_env(&igvm_params, platform, launch_info, cpuid_page, &mut idt);
     }
 
     // Get the available physical memory region for the kernel
-    let kernel_region = config
+    let kernel_region = igvm_params
         .find_kernel_region()
         .expect("Failed to find memory region for SVSM kernel");
 
@@ -867,12 +871,12 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // Create the page heap that will be used in the kernel region.  This is
     // the size of the kernel region minus the space used to hold the loaded
     // ELF image.
-    let mut kernel_heap = prepare_heap(kernel_region, kernel_elf_page_count, &config)
+    let mut kernel_heap = prepare_heap(kernel_region, kernel_elf_page_count, &igvm_params)
         .expect("Could not create kernel heap");
 
     // Set up the paging root for the kernel page tables, which will be
     // allocated from the kernel heap.
-    let mut kernel_page_tables = setup_kernel_page_tables(&mut kernel_heap, platform, &config)
+    let mut kernel_page_tables = setup_kernel_page_tables(&mut kernel_heap, platform, &igvm_params)
         .expect("Failed to configure kernel page tables");
 
     // Load the kernel ELF into the address space.
@@ -883,7 +887,7 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         &mut kernel_page_tables,
         &mut kernel_heap,
         platform,
-        &config,
+        &igvm_params,
     )
     .expect("Failed to load kernel ELF");
 
@@ -894,27 +898,32 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // Map the heap into the kernel address space immediately following the
     // kernel image.
     kernel_heap
-        .remap_memory(heap_base_vaddr, &mut kernel_page_tables, platform, &config)
+        .remap_memory(
+            heap_base_vaddr,
+            &mut kernel_page_tables,
+            platform,
+            &igvm_params,
+        )
         .expect("Failed to map kernel heap");
 
     // Allocate pages for an initial stack to be used in the kernel
     // environment.
     let (initial_stack_base, _) = kernel_heap
-        .allocate(STACK_SIZE, platform, &config)
+        .allocate(STACK_SIZE, platform, &igvm_params)
         .expect("Failed to allocate initial kernel stack");
     let initial_stack = initial_stack_base + STACK_SIZE;
 
     // Load the IGVM params, if present. Update loaded region accordingly.
     // SAFETY: The loaded kernel region was correctly calculated above and
     // is sized appropriately to include a copy of the IGVM parameters.
-    let igvm_vaddr = load_igvm_params(&mut kernel_heap, platform, &config, launch_info)
+    let igvm_vaddr = load_igvm_params(&mut kernel_heap, platform, &igvm_params, launch_info)
         .expect("Failed to load IGVM params");
 
     // Copy the CPUID page into the kernel address space as required.
     // SAFETY: the CPUID address is assumed to have been correctly retrieved
     // from the launch info by the stage2 platform object.
     let kernel_cpuid_page = unsafe {
-        copy_page_to_kernel(cpuid_page, &mut kernel_heap, platform, &config)
+        copy_page_to_kernel(cpuid_page, &mut kernel_heap, platform, &igvm_params)
             .expect("Failed to copy CPUID page")
     };
 
@@ -925,7 +934,7 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // SAFETY: the secrets page address is assumed to have been correctly
     // configured in the stage2 image if it is present at all.
     let kernel_secrets_page = unsafe {
-        let new_vaddr = copy_page_to_kernel(secrets_page, &mut kernel_heap, platform, &config)
+        let new_vaddr = copy_page_to_kernel(secrets_page, &mut kernel_heap, platform, &igvm_params)
             .expect("Failed to copy secrets page");
         if let Some(secrets_addr) = secrets_page {
             zero_mem_region(secrets_addr, secrets_addr + PAGE_SIZE);
@@ -936,13 +945,13 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     // Determine whether use of interrupts on the SVSM should be suppressed.
     // This is required when running SNP under KVM/QEMU.
     let suppress_svsm_interrupts = match platform_type {
-        SvsmPlatformType::Snp => config.suppress_svsm_interrupts_on_snp(),
+        SvsmPlatformType::Snp => igvm_params.suppress_svsm_interrupts_on_snp(),
         _ => false,
     };
 
     // Allocate memory in the kernel heap to hold the kernel launch parameters.
     let (launch_info_vaddr, _) = kernel_heap
-        .allocate(mem::size_of::<KernelLaunchInfo>(), platform, &config)
+        .allocate(mem::size_of::<KernelLaunchInfo>(), platform, &igvm_params)
         .expect("Failed to allocate memory for kernel launch block");
 
     // Build the handover information describing the memory layout and hand
@@ -962,10 +971,10 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         secrets_page: u64::from(kernel_secrets_page),
         igvm_params_virt_addr: u64::from(igvm_vaddr),
         vtom: launch_info.vtom,
-        debug_serial_port: config.debug_serial_port(),
-        use_alternate_injection: config.use_alternate_injection(),
+        debug_serial_port: igvm_params.debug_serial_port(),
+        use_alternate_injection: igvm_params.use_alternate_injection(),
         kernel_page_table_vaddr: u64::from(kernel_heap.phys_to_virt(kernel_page_tables.root())),
-        vmsa_in_kernel_heap: config.vmsa_in_kernel_range(),
+        vmsa_in_kernel_heap: igvm_params.vmsa_in_kernel_range(),
         suppress_svsm_interrupts,
     };
 
