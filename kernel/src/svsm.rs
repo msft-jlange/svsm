@@ -13,7 +13,6 @@ use bootlib::kernel_launch::KernelLaunchInfo;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
-use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
 use svsm::address::{Address, PhysAddr, VirtAddr};
 #[cfg(feature = "attest")]
@@ -32,6 +31,7 @@ use svsm::cpu::shadow_stack::{
 };
 use svsm::cpu::smp::start_secondary_cpus;
 use svsm::cpu::sse::sse_init;
+use svsm::cpu::tlb::flush_tlb_global_percpu;
 use svsm::debug::gdbstub::svsm_gdbstub::{debug_break, gdbstub_start};
 use svsm::debug::stacktrace::print_stack;
 use svsm::enable_shadow_stacks;
@@ -41,7 +41,7 @@ use svsm::igvm_params::IgvmBox;
 use svsm::kernel_region::new_kernel_region;
 use svsm::mm::alloc::{free_multiple_pages, memory_info, print_memory_info, root_mem_init};
 use svsm::mm::memory::init_memory_map;
-use svsm::mm::pagetable::paging_init;
+use svsm::mm::pagetable::{PageTable, paging_init};
 use svsm::mm::ro_after_init::make_ro_after_init;
 use svsm::mm::validate::init_valid_bitmap;
 use svsm::mm::virtualrange::virt_log_usage;
@@ -51,7 +51,7 @@ use svsm::platform::{init_capabilities, init_platform_type, SvsmPlatformCell, SV
 use svsm::sev::secrets_page::initialize_secrets_page;
 use svsm::sev::secrets_page_mut;
 use svsm::svsm_paging::{
-    enumerate_early_boot_regions, init_page_table, invalidate_early_boot_memory,
+    enumerate_early_boot_regions, invalidate_early_boot_memory,
 };
 use svsm::task::{schedule_init, start_kernel_task, KernelThreadStartInfo};
 use svsm::types::PAGE_SIZE;
@@ -235,26 +235,19 @@ unsafe fn svsm_start(li: *const KernelLaunchInfo) -> Option<VirtAddr> {
     init_valid_bitmap(new_kernel_region(launch_info.as_ref()), true)
         .expect("Failed to allocate valid-bitmap");
 
-    let kernel_elf_len = (launch_info.kernel_elf_stage2_virt_end
-        - launch_info.kernel_elf_stage2_virt_start) as usize;
-    let kernel_elf_buf_ptr = launch_info.kernel_elf_stage2_virt_start as *const u8;
-    // SAFETY: we trust stage 2 to pass on a correct pointer and length. This
-    // cannot be aliased because we are on CPU 0 and other CPUs have not been
-    // brought up. The resulting slice is &[u8], so there are no alignment
-    // requirements.
-    let kernel_elf_buf = unsafe { slice::from_raw_parts(kernel_elf_buf_ptr, kernel_elf_len) };
-    let kernel_elf = match elf::Elf64File::read(kernel_elf_buf) {
-        Ok(kernel_elf) => kernel_elf,
-        Err(e) => panic!("error reading kernel ELF: {}", e),
+    paging_init(platform, false).expect("Failed to initialize paging");
+
+    // SAFETY: the current page table was allocated by stage2 from the kernel
+    // heap and therefore it can be built into a PageBox.
+    let mut init_pgtable: PageBox<PageTable> = unsafe {
+        let page_table_ptr = (launch_info.kernel_page_table_vaddr as usize) as *mut PageTable;
+        PageBox::from_raw(NonNull::new(page_table_ptr).unwrap())
     };
 
-    paging_init(platform, false).expect("Failed to initialize paging");
-    let init_pgtable = init_page_table(launch_info.as_ref(), &kernel_elf)
-        .expect("Could not initialize the page table");
-    // SAFETY: we are initializing the state, including stack and registers
-    unsafe {
-        init_pgtable.load();
-    }
+    // Clear the low memory mapping from the initial page table now that
+    // stage2 access is no longer required.
+    init_pgtable.clear_entry(0);
+    flush_tlb_global_percpu();
 
     // SAFETY: this is the first CPU, so there can be no other dependencies
     // on multi-threaded access to the per-cpu areas.
