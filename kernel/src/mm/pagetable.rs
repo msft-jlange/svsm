@@ -572,11 +572,6 @@ impl PageTable {
         self.root.entries[entry] = other.root.entries[entry];
     }
 
-    /// Clears an entry.
-    pub fn clear_entry(&mut self, entry: usize) {
-        self.root.entries[entry].clear();
-    }
-
     /// Computes the index within a page table at the given level for a
     /// virtual address `vaddr`.
     ///
