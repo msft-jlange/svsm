@@ -87,6 +87,7 @@ impl From<PageValidateOp> for PvalidateOp {
 #[derive(Clone, Copy, Debug)]
 pub struct SnpPlatform {
     can_use_interrupts: bool,
+    use_restricted_injection: bool,
 }
 
 impl SnpPlatform {
@@ -101,6 +102,14 @@ impl SvsmPlatform for SnpPlatform {
     #[cfg(test)]
     fn platform_type(&self) -> SvsmPlatformType {
         SvsmPlatformType::Snp
+    }
+
+    /// Enters an idle halt state.
+    /// # Safety
+    /// This function must be called with interrupts disabled, and the caller
+    /// must guarantee that enabling interrupt processing will not cause
+    /// unexpected premption.
+    unsafe fn idle_halt(&self) {
     }
 
     fn env_setup(&mut self, _debug_serial_port: u16, vtom: usize) -> Result<(), SvsmError> {

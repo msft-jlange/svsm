@@ -63,6 +63,22 @@ impl SvsmPlatform for NativePlatform {
         SvsmPlatformType::Native
     }
 
+    /// Enters an idle halt state.
+    /// # Safety
+    /// This function must be called with interrupts disabled, and the caller
+    /// must guarantee that enabling interrupt processing will not cause
+    /// unexpected premption.
+    unsafe fn idle_halt(&self)
+    {
+        // SAFETY: the caller guarantees the safety of this assembly sequence.
+        unsafe {
+            asm!("sti",
+                 "hlt",
+                 "cli",
+                 );
+        }
+    }
+
     fn env_setup(&mut self, debug_serial_port: u16, _vtom: usize) -> Result<(), SvsmError> {
         // In the native platform, console output does not require the use of
         // any platform services, so it can be initialized immediately.
