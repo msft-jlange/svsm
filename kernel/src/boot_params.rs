@@ -16,13 +16,12 @@ use crate::platform::{PageStateChangeOp, PageValidateOp, SevFWMetaData, SVSM_PLA
 use crate::types::PageSize;
 use crate::utils::{page_align_up, round_to_pages, MemoryRegion};
 use alloc::vec::Vec;
-use cpuarch::vmsa::VMSA;
-
-use bootlib::boot_params::{BootParamBlock, IgvmParamPage, InitialGuestContext};
-use bootlib::kernel_launch::LOWMEM_END;
+use bootdefs::boot_params::{BootParamBlock, IgvmParamPage, InitialGuestContext};
+use bootdefs::kernel_launch::LOWMEM_END;
 use core::mem::size_of;
 use core::ops::Deref;
 use core::slice;
+use cpuarch::vmsa::VMSA;
 use igvm_defs::{IgvmEnvironmentInfo, MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
 
 const IGVM_MEMORY_ENTRIES_PER_PAGE: usize = PAGE_SIZE / size_of::<IGVM_VHS_MEMORY_MAP_ENTRY>();

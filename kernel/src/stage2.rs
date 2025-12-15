@@ -9,11 +9,11 @@
 
 pub mod boot_stage2;
 
-use bootlib::kernel_launch::{
+use bootdefs::kernel_launch::{
     KernelLaunchInfo, Stage2LaunchInfo, LOWMEM_END, STAGE2_HEAP_END, STAGE2_HEAP_START,
     STAGE2_STACK, STAGE2_STACK_END, STAGE2_START,
 };
-use bootlib::platform::SvsmPlatformType;
+use bootdefs::platform::SvsmPlatformType;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;

@@ -12,7 +12,7 @@ use crate::error::SvsmError;
 use crate::platform::{PageStateChangeOp, PageValidateOp, SvsmPlatform};
 use crate::types::PageSize;
 use crate::utils::{page_align_up, MemoryRegion};
-use bootlib::kernel_launch::{KernelLaunchInfo, LOWMEM_END};
+use bootdefs::kernel_launch::{KernelLaunchInfo, LOWMEM_END};
 
 use alloc::vec::Vec;
 

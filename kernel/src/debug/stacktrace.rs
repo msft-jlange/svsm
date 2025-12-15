@@ -14,7 +14,7 @@ use crate::{
     utils::MemoryRegion,
 };
 use alloc::format;
-use bootlib::kernel_launch::{STAGE2_STACK, STAGE2_STACK_END};
+use bootdefs::kernel_launch::{STAGE2_STACK, STAGE2_STACK_END};
 use core::{arch::asm, mem};
 
 extern "C" {

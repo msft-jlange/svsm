@@ -28,14 +28,15 @@ use crate::tdx::tdcall::{
 use crate::types::{PageSize, PAGE_SIZE};
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 use crate::utils::{is_aligned, MemoryRegion};
-use bootlib::kernel_launch::{ApStartContext, SIPI_STUB_GPA};
+
+use bootdefs::kernel_launch::{ApStartContext, SIPI_STUB_GPA};
 use core::mem;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU32, Ordering};
 use syscall::GlobalFeatureFlags;
 
 #[cfg(test)]
-use bootlib::platform::SvsmPlatformType;
+use bootdefs::platform::SvsmPlatformType;
 
 static GHCI_IO_DRIVER: GHCIIOPort = GHCIIOPort::new();
 static VTOM: ImmutAfterInitCell<usize> = ImmutAfterInitCell::uninit();

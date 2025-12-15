@@ -10,8 +10,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::mem::size_of;
 
-use bootlib::boot_params::{BootParamBlock, GuestFwInfoBlock, InitialGuestContext};
-use bootlib::platform::SvsmPlatformType;
+use bootdefs::boot_params::{BootParamBlock, GuestFwInfoBlock, InitialGuestContext};
+use bootdefs::platform::SvsmPlatformType;
 use clap::Parser;
 use igvm::registers::X86Register;
 use igvm::{

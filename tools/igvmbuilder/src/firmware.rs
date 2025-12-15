@@ -6,7 +6,7 @@
 
 use std::error::Error;
 
-use bootlib::boot_params::{GuestFwInfoBlock, InitialGuestContext};
+use bootdefs::boot_params::{GuestFwInfoBlock, InitialGuestContext};
 use igvm::IgvmDirectiveHeader;
 
 use crate::cmd_options::CmdOptions;

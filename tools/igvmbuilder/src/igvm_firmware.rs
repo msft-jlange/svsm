@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 
-use bootlib::boot_params::{GuestFwInfoBlock, InitialGuestContext};
-use bootlib::kernel_launch::{LOWMEM_END, STAGE2_HEAP_END};
+use bootdefs::boot_params::{GuestFwInfoBlock, InitialGuestContext};
+use bootdefs::kernel_launch::{LOWMEM_END, STAGE2_HEAP_END};
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile};
 use igvm_defs::{

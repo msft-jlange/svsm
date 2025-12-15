@@ -21,7 +21,7 @@ use crate::platform::{SvsmPlatform, SVSM_PLATFORM};
 use crate::task::schedule_init;
 use crate::utils::MemoryRegion;
 
-use bootlib::kernel_launch::ApStartContext;
+use bootdefs::kernel_launch::ApStartContext;
 use core::arch::global_asm;
 use core::mem;
 
