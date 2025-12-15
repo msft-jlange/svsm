@@ -9,11 +9,15 @@
 
 pub mod boot_stage2;
 
-use bootlib::kernel_launch::{
-    KernelLaunchInfo, LOWMEM_END, STAGE2_HEAP_END, STAGE2_HEAP_START, STAGE2_STACK,
-    STAGE2_STACK_END, STAGE2_START, Stage2LaunchInfo,
-};
-use bootlib::platform::SvsmPlatformType;
+use bootdefs::kernel_launch::KernelLaunchInfo;
+use bootdefs::kernel_launch::LOWMEM_END;
+use bootdefs::kernel_launch::STAGE2_HEAP_END;
+use bootdefs::kernel_launch::STAGE2_HEAP_START;
+use bootdefs::kernel_launch::STAGE2_STACK;
+use bootdefs::kernel_launch::STAGE2_STACK_END;
+use bootdefs::kernel_launch::STAGE2_START;
+use bootdefs::kernel_launch::Stage2LaunchInfo;
+use bootdefs::platform::SvsmPlatformType;
 use core::arch::asm;
 use core::mem;
 use core::mem::MaybeUninit;
