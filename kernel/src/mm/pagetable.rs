@@ -88,7 +88,7 @@ fn init_encrypt_mask(platform: &dyn SvsmPlatform) -> ImmutAfterInitResult<()> {
 }
 
 /// Returns the private encrypt mask value.
-fn private_pte_mask() -> usize {
+pub fn private_pte_mask() -> usize {
     *PRIVATE_PTE_MASK
 }
 

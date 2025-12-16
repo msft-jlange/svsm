@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//
+// Copyright (c) Microsoft Corporation
+//
+// Author: Jon Lange <jlange@microsoft.com>
+
+#![no_std]
+
+mod defs;
+mod elf;
+mod heap;
+mod page_tables;
+
+use crate::elf::get_elf_sizes;
+use crate::elf::load_kernel_elf;
+use crate::heap::create_kernel_heap;
+use crate::page_tables::round_to_pages;
+use crate::page_tables::setup_kernel_page_tables;
+
+pub use crate::defs::*;
+
+use ::elf::Elf64File;
+use bootdefs::kernel_launch::KernelLaunchInfo;
+use igvm_defs::PAGE_SIZE_4K;
+use zerocopy::IntoBytes;
+
+pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
+    boot_image_params: &BootImageParams<'_>,
+    host: &mut H,
+) -> Result<BootImageInfo, ()> {
+    // Parse the ELF image so it can be loaded.
+    let elf_bytes = host.get_kernel_image()?;
+    let kernel_elf = Elf64File::read(&elf_bytes).map_err(|_| {
+        host.display_error("Failed to parse kernel ELF file");
+    })?;
+
+    // Determine the virtual and physical address span of the kernel ELF image.
+    let kernel_elf_sizes = get_elf_sizes(&kernel_elf);
+
+    // Determine whether this image will reserve space in the kernel heap for
+    // a VMSA.  To maintain consistency across architectures, this is always
+    // set based on the VMSA address that will be used under SNP, and if the
+    // image is loaded on a non-SNP architecture, the reserved page will be
+    // freed during heap initialization.
+    let vmsa_in_kernel_heap = boot_image_params.boot_params.vmsa_in_kernel_range != 0;
+
+    // Initialize the kernel page heap so it can be used to manage physical
+    // allocations for the boot image.  The page heap starts at the first
+    // physical address after the loaded kernel ELF image, and at a virtual
+    // address following the end of the kernel ELF image.  A gap of one page
+    // is chosen to serve as a guard page for the initial stack.
+    let (kernel_phys_base, kernel_page_count) = host.get_kernel_phys_region();
+    let mut kernel_heap = create_kernel_heap(
+        kernel_phys_base,
+        kernel_page_count,
+        &kernel_elf_sizes,
+        PAGE_SIZE_4K,
+        vmsa_in_kernel_heap,
+        host,
+    )?;
+
+    // Allocate 32 KB for the intiial stack.  This must come at the base of
+    // the kernel heap so it is preceded by a guard page.  These pages must
+    // be added as empty pages so they are validated for immediate use.
+    let stack_page_count = 8;
+    let stack_size = stack_page_count * PAGE_SIZE_4K;
+    let (initial_stack_paddr, initial_stack_base) = kernel_heap.allocate_pages(stack_page_count)?;
+    host.add_page_data(initial_stack_paddr, None, stack_size)?;
+
+    // Initialize the page tables that will be used for mapping kernel data.
+    let mut kernel_page_tables =
+        setup_kernel_page_tables(kernel_elf_sizes.virt_base, &mut kernel_heap, host)?;
+
+    // Load the kernel image and map it into the kernel page tables.
+    let kernel_entry = load_kernel_elf(
+        &kernel_elf,
+        kernel_phys_base,
+        kernel_elf_sizes.phys_size,
+        &mut kernel_page_tables,
+        host,
+    )?;
+
+    // Map the heap into the page tables.
+    kernel_heap.map(&mut kernel_page_tables, host)?;
+
+    // Allocate space in the kernel heap to hold the parameters.  This must be
+    // large enough to include both the measured boot parameters and the
+    // unmeasured boot parameters.
+    let (boot_params_paddr, boot_params_vaddr) = kernel_heap.allocate_pages(round_to_pages(
+        boot_image_params.boot_params.param_area_size as u64,
+    ))?;
+
+    // Copy the boot data into the image.
+    add_page_contents(
+        host,
+        boot_params_paddr,
+        boot_image_params.boot_params.as_bytes(),
+    )?;
+
+    // Allocate space for the CPUID and secrets pages.
+    let (cpuid_paddr, cpuid_vaddr) = kernel_heap.allocate_pages(1)?;
+    let (secrets_paddr, secrets_vaddr) = kernel_heap.allocate_pages(1)?;
+
+    // Now that all mapping is complete, add the page table contents into the
+    // boot image.
+    let paging_root = kernel_page_tables.add_to_image(host)?;
+
+    // Allocate memory to hold the kernel launch info block.
+    let (launch_info_paddr, launch_info_vaddr) =
+        kernel_heap.allocate_pages(round_to_pages(size_of::<KernelLaunchInfo>() as u64))?;
+
+    let launch_info = KernelLaunchInfo {
+        kernel_region_phys_start: kernel_phys_base,
+        kernel_region_phys_end: kernel_phys_base + (kernel_page_count * PAGE_SIZE_4K),
+        heap_area_phys_start: kernel_heap.phys_base(),
+        heap_area_virt_start: kernel_heap.virt_base(),
+        heap_area_page_count: kernel_heap.page_count().try_into().unwrap(),
+        heap_area_allocated: kernel_heap.next_free().try_into().unwrap(),
+        kernel_region_virt_start: kernel_elf_sizes.virt_base,
+        kernel_fs_start: boot_image_params.kernel_fs_start,
+        kernel_fs_end: boot_image_params.kernel_fs_end,
+        stage2_start: boot_image_params.stage2_start,
+        cpuid_page: cpuid_vaddr,
+        secrets_page: secrets_vaddr,
+        boot_params_virt_addr: boot_params_vaddr,
+        vtom: boot_image_params.vtom,
+        debug_serial_port: boot_image_params.debug_serial_port,
+        use_alternate_injection: false,
+        kernel_page_table_vaddr: kernel_page_tables.root_vaddr(),
+        suppress_svsm_interrupts: false,
+        vmsa_in_kernel_heap,
+        _reserved: Default::default(),
+    };
+    add_page_contents(host, launch_info_paddr, launch_info.as_bytes())?;
+
+    let info = BootImageInfo {
+        boot_params_paddr,
+        cpuid_paddr,
+        secrets_paddr,
+        kernel_pdpt_paddr: kernel_page_tables.kernel_pdpt_paddr(),
+        kernel_pml4e_index: kernel_page_tables.kernel_pml4e_index(),
+        context: BootImageContext {
+            entry_point: kernel_entry,
+            initial_stack: initial_stack_base + (stack_page_count * PAGE_SIZE_4K),
+            initial_stack_base,
+            paging_root,
+            launch_info_vaddr,
+        },
+    };
+
+    Ok(info)
+}
