@@ -1094,7 +1094,9 @@ name = "igvmbuilder"
 version = "0.1.0"
 dependencies = [
  "bootdefs",
+ "bootimg",
  "clap",
+ "elf",
  "igvm",
  "igvm_defs",
  "uuid",

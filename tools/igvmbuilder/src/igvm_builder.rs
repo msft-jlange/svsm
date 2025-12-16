@@ -12,6 +12,7 @@ use std::mem::size_of;
 
 use bootdefs::boot_params::{BootParamBlock, GuestFwInfoBlock, InitialGuestContext};
 use bootdefs::platform::SvsmPlatformType;
+use bootimg::{load_boot_data, BootImageHost};
 use clap::Parser;
 use igvm::registers::X86Register;
 use igvm::{
@@ -142,6 +143,11 @@ impl IgvmBuilder {
         self.build_directives(&param_block, &start_context)?;
         self.build_initialization()?;
         self.build_platforms(&param_block);
+
+        // Prepare the kernel memory image.
+        if load_boot_data(&mut self).is_err() {
+            return Err("Failed to prepare boot image".into());
+        }
 
         // Separate the directive pages out from the others so we can populate them last.
         let (mut pages, others): (Vec<_>, Vec<_>) = self
@@ -662,5 +668,35 @@ impl IgvmBuilder {
     fn filter_pages(directive: &IgvmDirectiveHeader) -> bool {
         matches!(directive, IgvmDirectiveHeader::PageData { .. })
             || matches!(directive, IgvmDirectiveHeader::SnpVpContext { .. })
+    }
+}
+
+impl<'a> BootImageHost<'a> for IgvmBuilder {
+    fn get_kernel_image(&self) -> Result<&'a [u8], ()> {
+        /*
+        // Read a copy of the kernel ELF file.
+        let path = self.options.kernel.clone();
+        std::fs::read(&path).map_err(|e| {
+            eprintln!("Failed to read kernel ELF file {}", path);
+            e.into()
+        })
+        */
+        todo!();
+    }
+
+    fn get_kernel_phys_region(&self) -> (u64, u64) {
+        (
+            self.gpa_map.kernel.get_start(),
+            self.gpa_map.kernel.get_size(),
+        )
+    }
+    fn display_error(&self, _: &str) {
+        todo!()
+    }
+    fn get_confidential_address_mask(&self) -> u64 {
+        todo!()
+    }
+    fn add_page_contents(&mut self, _: u64, _: &[u8]) -> Result<(), ()> {
+        todo!()
     }
 }
