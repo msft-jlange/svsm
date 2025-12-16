@@ -980,6 +980,7 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         kernel_page_table_vaddr: u64::from(kernel_heap.phys_to_virt(kernel_page_tables.root())),
         vmsa_in_kernel_heap: boot_params.vmsa_in_kernel_range(),
         suppress_svsm_interrupts,
+        _reserved: Default::default(),
     };
 
     // SAFETY: the virtual address of the allocated block is known to be usable
@@ -1003,6 +1004,9 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         "  kernel_virtual_base      = {:#018x}",
         loaded_kernel_vregion.start()
     );
+
+    // Emit a reference to the boot image library just to force compilation.
+    bootimg::nop();
 
     log::info!("Starting SVSM kernel...");
 
