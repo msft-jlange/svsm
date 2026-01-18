@@ -148,5 +148,3 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
 
     Ok(info)
 }
-
-pub fn nop() {}
