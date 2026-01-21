@@ -111,13 +111,21 @@ impl GpaMap {
         };
 
         // Obtain the lengths of the binary files
-        let stage2_len = Self::get_metadata(&options.stage2)?.len() as usize;
-        if stage2_len > STAGE2_MAXLEN as usize {
-            return Err(format!(
-                "Stage2 binary size ({stage2_len:#x}) exceeds limit: {STAGE2_MAXLEN:#x}"
+        let (stage2_image, stage2_stack) = if let Some(ref stage2) = options.stage2 {
+            let stage2_len = Self::get_metadata(stage2)?.len() as usize;
+            if stage2_len > STAGE2_MAXLEN as usize {
+                return Err(format!(
+                    "Stage2 binary size ({stage2_len:#x}) exceeds limit: {STAGE2_MAXLEN:#x}"
+                )
+                .into());
+            }
+            (
+                GpaRange::new(STAGE2_START.into(), stage2_len as u64)?,
+                GpaRange::new_page(STAGE2_STACK_PAGE.into())?,
             )
-            .into());
-        }
+        } else {
+            (GpaRange::new(0, 0)?, GpaRange::new(0, 0)?)
+        };
 
         let kernel_elf_len = Self::get_metadata(&options.kernel)?.len() as usize;
         let kernel_fs_len = if let Some(fs) = &options.filesystem {
@@ -125,8 +133,6 @@ impl GpaMap {
         } else {
             0
         };
-
-        let stage2_image = GpaRange::new(STAGE2_START.into(), stage2_len as u64)?;
 
         // The kernel image is loaded beyond the end of the stage2 image,
         // rounded up to a 4 KB boundary.
@@ -195,7 +201,7 @@ impl GpaMap {
         let gpa_map = Self {
             base_addr: STAGE2_BASE.into(),
             stage1_image,
-            stage2_stack: GpaRange::new_page(STAGE2_STACK_PAGE.into())?,
+            stage2_stack,
             stage2_image,
             cpuid_page: GpaRange::new_page(CPUID_PAGE.into())?,
             kernel_fs,

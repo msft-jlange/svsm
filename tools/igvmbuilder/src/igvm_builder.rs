@@ -20,7 +20,6 @@ use bootimg::BootImageError;
 use bootimg::BootImageParams;
 use bootimg::prepare_boot_image;
 use clap::Parser;
-use igvm::registers::X86Register;
 use igvm::{
     Arch, IgvmDirectiveHeader, IgvmFile, IgvmInitializationHeader, IgvmPlatformHeader, IgvmRevision,
 };
@@ -137,16 +136,7 @@ impl IgvmBuilder {
     pub fn build(mut self) -> Result<(), Box<dyn Error>> {
         let param_block = self.create_param_block()?;
 
-        // Construct a native context object to capture the start context.
-        let start_rip = self.gpa_map.stage2_image.get_start();
-        let start_rsp = self.gpa_map.stage2_stack.get_end() - size_of::<Stage2Stack>() as u64;
-        let start_context = construct_start_context(
-            start_rip,
-            start_rsp,
-            self.gpa_map.init_page_tables.get_start(),
-        );
-
-        self.build_directives(&param_block, &start_context)?;
+        self.build_directives(&param_block)?;
         self.build_initialization()?;
         self.build_platforms(&param_block);
 
@@ -340,11 +330,7 @@ impl IgvmBuilder {
         Ok(())
     }
 
-    fn build_directives(
-        &mut self,
-        param_block: &BootParamBlock,
-        start_context: &[X86Register],
-    ) -> Result<(), Box<dyn Error>> {
+    fn build_directives(&mut self, param_block: &BootParamBlock) -> Result<(), Box<dyn Error>> {
         // Populate firmware directives.
         if let Some(firmware) = &self.firmware {
             self.directives.extend_from_slice(firmware.directives());
@@ -431,35 +417,6 @@ impl IgvmBuilder {
             },
         ));
 
-        if COMPATIBILITY_MASK.contains(SNP_COMPATIBILITY_MASK) {
-            // Add the VMSA.
-            self.directives.push(construct_vmsa(
-                start_context,
-                self.gpa_map.vmsa.get_start(),
-                param_block.vtom,
-                SNP_COMPATIBILITY_MASK,
-                &self.options.sev_features,
-                self.options.hypervisor,
-            ));
-        }
-
-        if COMPATIBILITY_MASK.contains(VSM_COMPATIBILITY_MASK) {
-            // Add the VSM register list.
-            self.directives.push(IgvmDirectiveHeader::X64VbsVpContext {
-                vtl: igvm::hv_defs::Vtl::Vtl2,
-                registers: start_context.to_vec(),
-                compatibility_mask: VSM_COMPATIBILITY_MASK,
-            });
-        }
-
-        if COMPATIBILITY_MASK.contains(NATIVE_COMPATIBILITY_MASK) {
-            // Include the native start context.
-            self.directives.push(construct_native_start_context(
-                start_context,
-                NATIVE_COMPATIBILITY_MASK,
-            ));
-        }
-
         // Add the boot parameter block
         self.add_param_block(param_block);
 
@@ -545,39 +502,83 @@ impl IgvmBuilder {
             IgvmPageDataType::NORMAL,
         )?;
 
-        // Populate the stage 2 binary.
-        self.add_data_pages_from_file(
-            &self.options.stage2.clone(),
-            self.gpa_map.stage2_image.get_start(),
-            COMPATIBILITY_MASK.get(),
-        )?;
+        // Process stage2 data if present.
+        let start_context = if let Some(ref stage2) = self.options.stage2 {
+            // Populate the stage 2 binary.
+            self.add_data_pages_from_file(
+                &stage2.clone(),
+                self.gpa_map.stage2_image.get_start(),
+                COMPATIBILITY_MASK.get(),
+            )?;
 
-        // Populate the stage 2 stack.  This has different contents on each
-        // platform.
-        let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom, &boot_image_info);
+            // Populate the stage 2 stack.  This has different contents on each
+            // platform.
+            let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom);
+            if COMPATIBILITY_MASK.contains(SNP_COMPATIBILITY_MASK) {
+                stage2_stack.add_directive(
+                    self.gpa_map.stage2_stack.get_start(),
+                    SvsmPlatformType::Snp,
+                    SNP_COMPATIBILITY_MASK,
+                    &mut self.directives,
+                );
+            }
+            if COMPATIBILITY_MASK.contains(TDP_COMPATIBILITY_MASK) {
+                stage2_stack.add_directive(
+                    self.gpa_map.stage2_stack.get_start(),
+                    SvsmPlatformType::Tdp,
+                    TDP_COMPATIBILITY_MASK,
+                    &mut self.directives,
+                );
+            }
+            if COMPATIBILITY_MASK.contains(ANY_NATIVE_COMPATIBILITY_MASK) {
+                stage2_stack.add_directive(
+                    self.gpa_map.stage2_stack.get_start(),
+                    SvsmPlatformType::Native,
+                    ANY_NATIVE_COMPATIBILITY_MASK,
+                    &mut self.directives,
+                );
+            }
+
+            // Construct a native context object to capture the start context.
+            let start_rip = self.gpa_map.stage2_image.get_start();
+            let start_rsp = self.gpa_map.stage2_stack.get_end() - size_of::<Stage2Stack>() as u64;
+            construct_start_context(
+                start_rip,
+                start_rsp,
+                self.gpa_map.init_page_tables.get_start(),
+            )
+        } else {
+            // Stage2 is currently required on all platforms.
+            return Err("stage2 required but not specified".into());
+        };
+
         if COMPATIBILITY_MASK.contains(SNP_COMPATIBILITY_MASK) {
-            stage2_stack.add_directive(
-                self.gpa_map.stage2_stack.get_start(),
-                SvsmPlatformType::Snp,
+            // Add the VMSA.
+            self.directives.push(construct_vmsa(
+                &start_context,
+                self.gpa_map.vmsa.get_start(),
+                param_block.vtom,
                 SNP_COMPATIBILITY_MASK,
-                &mut self.directives,
-            );
+                &self.options.sev_features,
+                self.options.hypervisor,
+            ));
         }
-        if COMPATIBILITY_MASK.contains(TDP_COMPATIBILITY_MASK) {
-            stage2_stack.add_directive(
-                self.gpa_map.stage2_stack.get_start(),
-                SvsmPlatformType::Tdp,
-                TDP_COMPATIBILITY_MASK,
-                &mut self.directives,
-            );
+
+        if COMPATIBILITY_MASK.contains(VSM_COMPATIBILITY_MASK) {
+            // Add the VSM register list.
+            self.directives.push(IgvmDirectiveHeader::X64VbsVpContext {
+                vtl: igvm::hv_defs::Vtl::Vtl2,
+                registers: start_context.to_vec(),
+                compatibility_mask: VSM_COMPATIBILITY_MASK,
+            });
         }
-        if COMPATIBILITY_MASK.contains(ANY_NATIVE_COMPATIBILITY_MASK) {
-            stage2_stack.add_directive(
-                self.gpa_map.stage2_stack.get_start(),
-                SvsmPlatformType::Native,
-                ANY_NATIVE_COMPATIBILITY_MASK,
-                &mut self.directives,
-            );
+
+        if COMPATIBILITY_MASK.contains(NATIVE_COMPATIBILITY_MASK) {
+            // Include the native start context.
+            self.directives.push(construct_native_start_context(
+                &start_context,
+                NATIVE_COMPATIBILITY_MASK,
+            ));
         }
 
         if COMPATIBILITY_MASK.contains(ANY_NATIVE_COMPATIBILITY_MASK) {
