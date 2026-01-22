@@ -8,6 +8,7 @@
 
 mod defs;
 mod elf;
+mod error;
 mod heap;
 mod page_tables;
 
@@ -18,6 +19,7 @@ use crate::page_tables::round_to_pages;
 use crate::page_tables::setup_kernel_page_tables;
 
 pub use crate::defs::*;
+pub use crate::error::BootImageError;
 
 use ::elf::Elf64File;
 use bootdefs::kernel_launch::INITIAL_KERNEL_STACK_WORDS;
