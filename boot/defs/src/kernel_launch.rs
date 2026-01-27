@@ -20,10 +20,9 @@ pub const STAGE2_HEAP_START: u32 = 0x10000; // 64 KB
 pub const STAGE2_HEAP_END: u32 = LOWMEM_END; // 640 KB
 pub const STAGE2_BASE: u32 = 0x800000; // Start of stage2 area excluding heap
 pub const STAGE2_STACK_END: u32 = STAGE2_BASE;
-pub const STAGE2_STACK_PAGE: u32 = 0x805000;
+pub const STAGE2_STACK_PAGE: u32 = 0x806000;
 pub const STAGE2_INFO_SZ: u32 = size_of::<Stage2LaunchInfo>() as u32;
 pub const STAGE2_STACK: u32 = STAGE2_STACK_PAGE + 0x1000 - STAGE2_INFO_SZ;
-pub const SECRETS_PAGE: u32 = 0x806000;
 pub const CPUID_PAGE: u32 = 0x807000;
 // Stage2 is loaded at 8 MB + 32 KB
 pub const STAGE2_START: u32 = 0x808000;
@@ -84,10 +83,6 @@ pub struct Stage2LaunchInfo {
     // cpuid_page must be the third field.
     pub cpuid_page: u32,
 
-    // secrets page must be the fourth field.
-    pub secrets_page: u32,
-    pub _reserved1: u32,
-
     pub kernel_entry: u64,
     pub kernel_stack: u64,
     pub kernel_pdpt_paddr: u64,
@@ -97,7 +92,7 @@ pub struct Stage2LaunchInfo {
     pub kernel_fs_end: u32,
     pub boot_params: u32,
     pub kernel_pml4e_index: u32,
-    pub _reserved2: u32,
+    pub _reserved: u32,
 }
 
 #[repr(C)]

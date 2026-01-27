@@ -31,7 +31,6 @@ impl Stage2Stack {
             vtom,
             platform_type: 0,
             cpuid_page: gpa_map.cpuid_page.get_start() as u32,
-            secrets_page: gpa_map.secrets_page.get_start() as u32,
             kernel_entry: boot_image_info.context.entry_point,
             kernel_stack: boot_image_info.context.initial_stack,
             kernel_pml4e_index: boot_image_info.kernel_pml4e_index,
