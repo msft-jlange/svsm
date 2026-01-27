@@ -9,7 +9,6 @@
 
 pub mod boot_stage2;
 
-use bootdefs::boot_params::BootParamBlock;
 use bootdefs::kernel_launch::LOWMEM_END;
 use bootdefs::kernel_launch::STAGE2_HEAP_END;
 use bootdefs::kernel_launch::STAGE2_HEAP_START;
@@ -18,12 +17,7 @@ use bootdefs::kernel_launch::STAGE2_STACK_END;
 use bootdefs::kernel_launch::STAGE2_START;
 use bootdefs::kernel_launch::Stage2LaunchInfo;
 use bootdefs::platform::SvsmPlatformType;
-use bootimg::BootImageError;
-use bootimg::BootImageInfo;
-use bootimg::BootImageParams;
-use bootimg::prepare_boot_image;
 use core::arch::global_asm;
-use core::mem;
 use core::panic::PanicInfo;
 use core::slice;
 use cpuarch::snp_cpuid::SnpCpuidTable;
@@ -40,7 +34,6 @@ use svsm::debug::stacktrace::print_stack;
 use svsm::error::SvsmError;
 use svsm::mm::FixedAddressMappingRange;
 use svsm::mm::SVSM_PERCPU_BASE;
-use svsm::mm::SVSM_PERTASK_BASE;
 use svsm::mm::alloc::memory_info;
 use svsm::mm::alloc::print_memory_info;
 use svsm::mm::alloc::root_mem_init;
@@ -50,18 +43,13 @@ use svsm::mm::pagetable::PTEntryFlags;
 use svsm::mm::pagetable::PageTable;
 use svsm::mm::pagetable::make_private_address;
 use svsm::mm::pagetable::paging_init;
-use svsm::mm::pagetable::private_pte_mask;
-use svsm::mm::validate::validate_mapped_region;
 use svsm::platform;
-use svsm::platform::Stage2Platform;
 use svsm::platform::Stage2PlatformCell;
 use svsm::platform::SvsmPlatform;
 use svsm::platform::SvsmPlatformCell;
 use svsm::platform::init_platform_type;
 use svsm::types::PAGE_SIZE;
 use svsm::utils::MemoryRegion;
-use svsm::utils::page_align_up;
-use svsm::utils::round_to_pages;
 
 use release::COCONUT_VERSION;
 
@@ -90,96 +78,6 @@ impl KernelPageTablePage<'_> {
 
     fn entry_mut(&mut self, index: usize) -> &mut PTEntry {
         &mut self.entries[index]
-    }
-}
-
-struct Stage2BootLoader<'a> {
-    map_vaddr: VirtAddr,
-    kernel_region_base: PhysAddr,
-    platform: &'a dyn SvsmPlatform,
-    boot_params: &'a BootParams<'a>,
-}
-
-impl<'a> Stage2BootLoader<'a> {
-    fn new(
-        kernel_region: &MemoryRegion<PhysAddr>,
-        platform: &'a dyn SvsmPlatform,
-        boot_params: &'a BootParams<'_>,
-    ) -> Self {
-        // The temporary mapping address is initialized as the per-task area.
-        // The address range is arbitrary since it is only used for temporary
-        // mappings while stage2 is running, and selecting the per-task
-        // address space permits temporary mappings without requiring a
-        // TLB invalidation after the mappings are used.  The global address
-        // range must not be used since that range will be used after
-        // preparation of the boot image is complete, and that use must not
-        // conflict with temporary mappings that were created during boot
-        // image preparation.
-        Self {
-            kernel_region_base: kernel_region.start(),
-            map_vaddr: SVSM_PERTASK_BASE,
-            platform,
-            boot_params,
-        }
-    }
-
-    fn phys_to_virt(&self, paddr: u64) -> VirtAddr {
-        // The kernel physical memory region is mapped as a contiguous range
-        // beginning at the mapping base address.  This simplifies the task
-        // of looking up the virtual addres corresponding to a given physical
-        // address in the mapping area.
-        let offset = paddr - u64::from(self.kernel_region_base);
-        self.map_vaddr + (offset as usize)
-    }
-
-    fn add_page_data(
-        &mut self,
-        paddr: u64,
-        data: Option<&[u8]>,
-        total_size: u64,
-    ) -> Result<(), BootImageError> {
-        let total_size = total_size as usize;
-        assert_eq!((total_size & (PAGE_SIZE - 1)), 0);
-        // Create a page mapping at the next available virtual address.
-        // Since the stage2 page tables will be discarded upon entry to the
-        // kernel, the specific mapping address doesn't matter.  The addresses
-        // are used in sequence to avoid the need for any TLB flush after
-        // the address has been used.
-        let map_region = MemoryRegion::new(self.phys_to_virt(paddr), total_size);
-        map_page_range(map_region, PhysAddr::new(paddr as usize)).map_err(|e| {
-            log::error!("Failed to map kernel memory: {:?}", e);
-            BootImageError::Host
-        })?;
-        // SAFETY: the virtual address used for mapping is in a portion of the
-        // virtual address space unused anywhere else, so it can safely be
-        // used for mapping here.
-        unsafe {
-            validate_mapped_region(self.platform, self.boot_params, map_region).map_err(|e| {
-                log::error!("Failed to validate kernel memory: {:?}", e);
-                BootImageError::Host
-            })?;
-
-            let target_ptr = map_region.start().as_mut_ptr::<u8>();
-            let data_len = match data {
-                Some(data_slice) => {
-                    assert!(data_slice.len() <= total_size);
-                    core::ptr::copy_nonoverlapping(
-                        data_slice.as_ptr(),
-                        target_ptr,
-                        data_slice.len(),
-                    );
-                    data_slice.len()
-                }
-                None => 0,
-            };
-
-            // Zero the tail end of any partial page.
-            if data_len < total_size {
-                core::ptr::write_bytes(target_ptr.add(data_len), 0, total_size - data_len);
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -330,107 +228,6 @@ fn map_page_range(vregion: MemoryRegion<VirtAddr>, paddr: PhysAddr) -> Result<()
     Ok(())
 }
 
-fn get_kernel_elf(launch_info: &Stage2LaunchInfo) -> &'static [u8] {
-    // Find the bounds of the kernel ELF and load it into the ELF parser
-    let elf_start = PhysAddr::from(launch_info.kernel_elf_start as u64);
-    let elf_end = PhysAddr::from(launch_info.kernel_elf_end as u64);
-    let elf_len = elf_end - elf_start;
-    // SAFETY: the base address of the ELF image was selected by the loader and
-    // is known not to conflict with any other virtual address mappings.
-    unsafe { slice::from_raw_parts(elf_start.bits() as *const u8, elf_len) }
-}
-
-fn prepare_kernel_image(
-    stage2_platform: &dyn Stage2Platform,
-    launch_info: &Stage2LaunchInfo,
-    boot_params: &BootParams<'_>,
-    boot_image_params: &BootImageParams<'_>,
-    boot_loader: &mut Stage2BootLoader<'_>,
-) -> Result<BootImageInfo, BootImageError> {
-    // Obtain a reference to the kernel image data.
-    let kernel_image_bytes = get_kernel_elf(launch_info);
-
-    // Prepare the boot image using the common library.
-    let boot_image_info = prepare_boot_image(
-        boot_image_params,
-        kernel_image_bytes,
-        &mut |paddr, data, len| boot_loader.add_page_data(paddr, data, len),
-    )?;
-
-    // No confidentiality bits are present in the kernel page table portion of
-    // the boot image.  Therefore, the page tables need to be walked now to
-    // insert confidentiality bits as defined by the current platform.  This
-    // is only necessary if there is a non-zero confidentiailty mask.
-    if private_pte_mask() != 0 {
-        for pt_index in 0..boot_image_info.total_pt_pages {
-            let paddr = boot_image_info.kernel_page_tables_base + (pt_index * PAGE_SIZE as u64);
-            // SAFETY: the boot image has been fully mapped and the address
-            // translation from physical to virtual is known to be correct by
-            // construction.
-            let mut page_table_page =
-                unsafe { KernelPageTablePage::new(boot_loader.phys_to_virt(paddr)) };
-            for entry in 0..svsm::mm::pagetable::ENTRY_COUNT {
-                page_table_page.entry_mut(entry).make_private_if_present();
-            }
-        }
-    }
-
-    // Preparing the boot image only mapped those portion of the boot
-    // parameters that are measured.  The unmeasured contents need to be loaded
-    // now as the loader would load them.  Load them into the kernel area
-    // as if they had been prepared as part of the boot image.  The unmeasured
-    // boot parameters follow the measured boot parameters, so capture the
-    // unmeasured data as the portion of the boot data byte slice that follows
-    // the measured parameters.
-    let boot_params_measured_size = page_align_up(mem::size_of::<BootParamBlock>());
-    let boot_params_unmeasured_size = boot_params.size() - boot_params_measured_size;
-    let (_, unmeasured_slice) = boot_params
-        .as_byte_slice()
-        .split_at(boot_params_measured_size);
-
-    // Copy the data into the kernel image as if it had been prepared as part
-    // of the boot image.
-    boot_loader
-        .add_page_data(
-            boot_image_info.boot_params_paddr + boot_params_measured_size as u64,
-            Some(unmeasured_slice),
-            boot_params_unmeasured_size as u64,
-        )
-        .inspect_err(|_| {
-            log::error!("Failed to add unmeasured data to boot image");
-        })?;
-
-    // Copy the CPUID and secrets pages into the kernel image as if they had
-    // been prepared as part of the boot image.
-    // SAFETY: the platform guarantees the correctness of the CPUID and secrets
-    // page virtual addresses from the stage2 launch info.
-    let (cpuid_slice, secrets_slice) = unsafe {
-        (
-            stage2_platform
-                .get_cpuid_page(launch_info)
-                .map(|vaddr| slice::from_raw_parts(vaddr.as_ptr::<u8>(), PAGE_SIZE)),
-            stage2_platform
-                .get_secrets_page(launch_info)
-                .map(|vaddr| slice::from_raw_parts(vaddr.as_ptr::<u8>(), PAGE_SIZE)),
-        )
-    };
-
-    boot_loader
-        .add_page_data(boot_image_info.cpuid_paddr, cpuid_slice, PAGE_SIZE as u64)
-        .and_then(|_| {
-            boot_loader.add_page_data(
-                boot_image_info.secrets_paddr,
-                secrets_slice,
-                PAGE_SIZE as u64,
-            )
-        })
-        .inspect_err(|_| {
-            log::error!("Failed to add platform data pages to boot image");
-        })?;
-
-    Ok(boot_image_info)
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     let platform_type = SvsmPlatformType::from(launch_info.platform_type);
@@ -466,26 +263,6 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
 
     log::info!("SVSM memory region: {kernel_region:#018x}");
 
-    // Invoke the boot image builder to assemble the kernel image.
-    let mut boot_image_host = Stage2BootLoader::new(&kernel_region, platform, &boot_params);
-    let boot_image_params = BootImageParams {
-        boot_params: boot_params.param_block(),
-        kernel_region_start: u64::from(kernel_region.start()),
-        kernel_region_page_count: round_to_pages(kernel_region.len()).try_into().unwrap(),
-        kernel_fs_start: u64::from(launch_info.kernel_fs_start),
-        kernel_fs_end: u64::from(launch_info.kernel_fs_end),
-        stage2_start: 0x800000u64,
-        vtom: launch_info.vtom,
-    };
-    let boot_image_info = prepare_kernel_image(
-        stage2_platform,
-        launch_info,
-        &boot_params,
-        &boot_image_params,
-        &mut boot_image_host,
-    )
-    .expect("Failed to load kernel image");
-
     // Set the PML4E of the new kernel page tables in the current page table so
     // the kernel address space is also visible in the current address space.
     // SAFETY: the physical address of the current paging root is known to be
@@ -498,8 +275,8 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
             svsm::mm::pagetable::ENTRY_COUNT,
         );
         let pxe_flags = PTEntryFlags::PRESENT | PTEntryFlags::WRITABLE | PTEntryFlags::ACCESSED;
-        cur_pgtable[boot_image_info.kernel_pml4e_index as usize].set_unrestricted(
-            make_private_address(PhysAddr::from(boot_image_info.kernel_pdpt_paddr)),
+        cur_pgtable[launch_info.kernel_pml4e_index as usize].set_unrestricted(
+            make_private_address(PhysAddr::from(launch_info.kernel_pdpt_paddr)),
             pxe_flags,
         );
     };
@@ -522,8 +299,8 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
         shutdown_percpu();
 
         switch_to_kernel(
-            boot_image_info.context.entry_point,
-            boot_image_info.context.initial_stack,
+            launch_info.kernel_entry,
+            launch_info.kernel_stack,
             platform_type as u64,
         );
     };

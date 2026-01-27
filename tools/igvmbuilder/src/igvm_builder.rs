@@ -6,14 +6,19 @@
 
 use std::cmp::Ordering;
 use std::error::Error;
+use std::fs;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
+use std::io::Write;
 use std::mem::size_of;
 
 use bootdefs::boot_params::BootParamBlock;
 use bootdefs::boot_params::GuestFwInfoBlock;
 use bootdefs::boot_params::InitialGuestContext;
 use bootdefs::platform::SvsmPlatformType;
+use bootimg::BootImageError;
+use bootimg::BootImageParams;
+use bootimg::prepare_boot_image;
 use clap::Parser;
 use igvm::registers::X86Register;
 use igvm::{
@@ -467,12 +472,25 @@ impl IgvmBuilder {
             )?;
         }
 
-        // Add the kernel elf binary
-        self.add_data_pages_from_file(
-            &self.options.kernel.clone(),
-            self.gpa_map.kernel_elf.get_start(),
-            COMPATIBILITY_MASK.get(),
-        )?;
+        // Read the kernel image into a byte vector to be used by the boot
+        // image builder.
+        let kernel_image = fs::read(self.options.kernel.clone()).inspect_err(|_| {
+            eprintln!("Failed to read kernel image {}", self.options.kernel);
+        })?;
+
+        // Invoke the boot image builder to construct the boot image.
+        let boot_image_params = BootImageParams {
+            boot_params: param_block,
+            kernel_fs_start: self.gpa_map.kernel_fs.get_start(),
+            kernel_fs_end: self.gpa_map.kernel_fs.get_end(),
+            kernel_region_start: self.gpa_map.kernel.get_start(),
+            kernel_region_page_count: self.gpa_map.kernel.get_size() / PAGE_SIZE_4K,
+            stage2_start: self.gpa_map.stage2_image.get_start(),
+            vtom: param_block.vtom,
+        };
+        let boot_image_info =
+            prepare_boot_image(&boot_image_params, kernel_image.as_slice(), &mut |_, _, _| todo!())
+                .map_err(|e| e.dyn_error())?;
 
         if COMPATIBILITY_MASK.contains(SNP_COMPATIBILITY_MASK) {
             // CPUID page
@@ -536,7 +554,7 @@ impl IgvmBuilder {
 
         // Populate the stage 2 stack.  This has different contents on each
         // platform.
-        let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom);
+        let stage2_stack = Stage2Stack::new(&self.gpa_map, param_block.vtom, &boot_image_info);
         if COMPATIBILITY_MASK.contains(SNP_COMPATIBILITY_MASK) {
             stage2_stack.add_directive(
                 self.gpa_map.stage2_stack.get_start(),

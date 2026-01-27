@@ -8,6 +8,7 @@ use std::mem::size_of;
 
 use bootdefs::kernel_launch::Stage2LaunchInfo;
 use bootdefs::platform::SvsmPlatformType;
+use bootimg::BootImageInfo;
 use igvm::IgvmDirectiveHeader;
 use igvm_defs::{IgvmPageDataFlags, IgvmPageDataType, PAGE_SIZE_4K};
 use zerocopy::IntoBytes;
@@ -21,11 +22,9 @@ pub struct Stage2Stack {
 const _: () = assert!((size_of::<Stage2Stack>() as u64) <= PAGE_SIZE_4K);
 
 impl Stage2Stack {
-    pub fn new(gpa_map: &GpaMap, vtom: u64) -> Self {
+    pub fn new(gpa_map: &GpaMap, vtom: u64, boot_image_info: &BootImageInfo) -> Self {
         let stage2_stack = Stage2LaunchInfo {
             stage2_end: gpa_map.stage2_image.get_end() as u32,
-            kernel_elf_start: gpa_map.kernel_elf.get_start() as u32,
-            kernel_elf_end: (gpa_map.kernel_elf.get_start() + gpa_map.kernel_elf.get_size()) as u32,
             kernel_fs_start: gpa_map.kernel_fs.get_start() as u32,
             kernel_fs_end: (gpa_map.kernel_fs.get_start() + gpa_map.kernel_fs.get_size()) as u32,
             boot_params: gpa_map.boot_param_block.get_start() as u32,
@@ -33,7 +32,12 @@ impl Stage2Stack {
             platform_type: 0,
             cpuid_page: gpa_map.cpuid_page.get_start() as u32,
             secrets_page: gpa_map.secrets_page.get_start() as u32,
-            _reserved: 0,
+            kernel_entry: boot_image_info.context.entry_point,
+            kernel_stack: boot_image_info.context.initial_stack,
+            kernel_pml4e_index: boot_image_info.kernel_pml4e_index,
+            kernel_pdpt_paddr: boot_image_info.kernel_pdpt_paddr,
+            _reserved1: 0,
+            _reserved2: 0,
         };
         Self { stage2_stack }
     }

@@ -84,16 +84,20 @@ pub struct Stage2LaunchInfo {
     // cpuid_page must be the third field.
     pub cpuid_page: u32,
 
-    // secrets_page must be the fourth field.
+    // secrets page must be the fourth field.
     pub secrets_page: u32,
+    pub _reserved1: u32,
+
+    pub kernel_entry: u64,
+    pub kernel_stack: u64,
+    pub kernel_pdpt_paddr: u64,
 
     pub stage2_end: u32,
-    pub kernel_elf_start: u32,
-    pub kernel_elf_end: u32,
     pub kernel_fs_start: u32,
     pub kernel_fs_end: u32,
     pub boot_params: u32,
-    pub _reserved: u32,
+    pub kernel_pml4e_index: u32,
+    pub _reserved2: u32,
 }
 
 #[repr(C)]
