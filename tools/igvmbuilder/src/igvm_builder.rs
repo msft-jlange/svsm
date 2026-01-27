@@ -526,8 +526,8 @@ impl IgvmBuilder {
 
             // Secrets page
             self.add_empty_pages(
-                self.gpa_map.secrets_page.get_start(),
-                self.gpa_map.secrets_page.get_size(),
+                boot_image_info.secrets_paddr,
+                PAGE_SIZE_4K,
                 SNP_COMPATIBILITY_MASK,
                 IgvmPageDataType::SECRETS,
             )?;
@@ -543,8 +543,8 @@ impl IgvmBuilder {
 
             // Insert a zero page in place of the secrets page
             self.add_empty_pages(
-                self.gpa_map.secrets_page.get_start(),
-                self.gpa_map.secrets_page.get_size(),
+                boot_image_info.secrets_paddr,
+                PAGE_SIZE_4K,
                 TDP_COMPATIBILITY_MASK,
                 IgvmPageDataType::NORMAL,
             )?;
