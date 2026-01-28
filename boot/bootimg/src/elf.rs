@@ -5,7 +5,6 @@
 // Author: Jon Lange <jlange@microsoft.com>
 
 use crate::BootImageError;
-use crate::BootImageHost;
 use crate::page_tables::KernelPageTables;
 use crate::page_tables::PteType;
 use crate::page_tables::is_page_aligned;
@@ -41,12 +40,15 @@ pub fn get_elf_sizes(elf: &Elf64File<'_>) -> ElfSizes {
 }
 
 /// Loads a single ELF segment and returns its virtual memory region.
-fn load_elf_segment<'a, H: BootImageHost<'a>>(
+fn load_elf_segment<F>(
     segment: elf::Elf64ImageLoadSegment<'_>,
     paddr: u64,
     page_tables: &mut KernelPageTables,
-    host: &mut H,
-) -> Result<u64, BootImageError> {
+    add_page_data: &mut F,
+) -> Result<u64, BootImageError>
+where
+    F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+{
     // Find the segment's bounds
     let segment_start = segment.vaddr_range.vaddr_begin;
     let segment_end = page_align_up(segment.vaddr_range.vaddr_end);
@@ -75,26 +77,29 @@ fn load_elf_segment<'a, H: BootImageHost<'a>>(
 
     // Copy the segment contents into the boot image.  This requires specifying
     // the size of the segment to ensure that BSS data is fully expanded.
-    host.add_page_data(paddr, Some(segment.file_contents), segment_len)?;
+    add_page_data(paddr, Some(segment.file_contents), segment_len)?;
 
     Ok(segment_len)
 }
 
 /// Loads the kernel ELF and returns the entry point.
-pub fn load_kernel_elf<'a, H: BootImageHost<'a>>(
+pub fn load_kernel_elf<F>(
     elf: &Elf64File<'_>,
     paddr_base: u64,
     expected_page_count: u64,
     page_tables: &mut KernelPageTables,
-    host: &mut H,
-) -> Result<u64, BootImageError> {
+    add_page_data: &mut F,
+) -> Result<u64, BootImageError>
+where
+    F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+{
     let vaddr_alloc_info = elf.image_load_vaddr_alloc_info();
     let vaddr_alloc_base = vaddr_alloc_info.range.vaddr_begin;
 
     // Map and populate the SVSM kernel ELF's PT_LOAD segments.
     let mut phys_addr = paddr_base;
     for segment in elf.image_load_segment_iter(vaddr_alloc_base) {
-        let size = load_elf_segment(segment, phys_addr, page_tables, host)?;
+        let size = load_elf_segment(segment, phys_addr, page_tables, add_page_data)?;
 
         // Update to the next contiguous physical address
         phys_addr += size;

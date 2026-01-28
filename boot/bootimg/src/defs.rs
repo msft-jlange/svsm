@@ -65,24 +65,9 @@ pub struct BootImageParams<'a> {
     pub boot_params: &'a BootParamBlock,
 }
 
-pub trait BootImageHost<'a> {
-    /// Obtains an ELF file containing the kernel image.
-    fn get_kernel_image(&self) -> Result<&'a [u8], BootImageError>;
-
-    /// Inserts data into the boot image, or empty pages if no data is
-    /// supplied..
-    fn add_page_data(
-        &mut self,
-        paddr: u64,
-        contents: Option<&[u8]>,
-        total_size: u64,
-    ) -> Result<(), BootImageError>;
-}
-
-pub fn add_page_contents<'a, H: BootImageHost<'a>>(
-    host: &mut H,
-    paddr: u64,
-    contents: &[u8],
-) -> Result<(), BootImageError> {
-    host.add_page_data(paddr, Some(contents), page_align_up(contents.len() as u64))
+pub fn add_page_contents<F>(f: &mut F, paddr: u64, contents: &[u8]) -> Result<(), BootImageError>
+where
+    F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+{
+    f(paddr, Some(contents), page_align_up(contents.len() as u64))
 }

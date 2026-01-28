@@ -24,13 +24,16 @@ use bootdefs::kernel_launch::KernelLaunchInfo;
 use igvm_defs::PAGE_SIZE_4K;
 use zerocopy::IntoBytes;
 
-pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
+pub fn prepare_boot_image<F>(
     boot_image_params: &BootImageParams<'_>,
-    host: &mut H,
-) -> Result<BootImageInfo, BootImageError> {
+    kernel_elf_bytes: &[u8],
+    add_page_data: &mut F,
+) -> Result<BootImageInfo, BootImageError>
+where
+    F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+{
     // Parse the ELF image so it can be loaded.
-    let elf_bytes = host.get_kernel_image()?;
-    let kernel_elf = Elf64File::read(elf_bytes).map_err(|_| BootImageError::Elf)?;
+    let kernel_elf = Elf64File::read(kernel_elf_bytes).map_err(|_| BootImageError::Elf)?;
 
     // Determine the virtual and physical address span of the kernel ELF image.
     let kernel_elf_sizes = get_elf_sizes(&kernel_elf);
@@ -61,11 +64,11 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
     let stack_page_count = 8;
     let stack_size = stack_page_count * PAGE_SIZE_4K;
     let (initial_stack_paddr, initial_stack_base) = kernel_heap.allocate_pages(stack_page_count)?;
-    host.add_page_data(initial_stack_paddr, None, stack_size)?;
+    add_page_data(initial_stack_paddr, None, stack_size)?;
 
     // Initialize the page tables that will be used for mapping kernel data.
     let mut kernel_page_tables =
-        setup_kernel_page_tables(kernel_elf_sizes.virt_base, &mut kernel_heap, host)?;
+        setup_kernel_page_tables(kernel_elf_sizes.virt_base, &mut kernel_heap, add_page_data)?;
 
     // Load the kernel image and map it into the kernel page tables.
     let kernel_entry = load_kernel_elf(
@@ -73,7 +76,7 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
         boot_image_params.kernel_region_start,
         kernel_elf_sizes.phys_size,
         &mut kernel_page_tables,
-        host,
+        add_page_data,
     )?;
 
     // Map the heap into the page tables.
@@ -88,7 +91,7 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
 
     // Copy the boot data into the image.
     add_page_contents(
-        host,
+        add_page_data,
         boot_params_paddr,
         boot_image_params.boot_params.as_bytes(),
     )?;
@@ -99,7 +102,7 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
 
     // Now that all mapping is complete, add the page table contents into the
     // boot image.
-    let (paging_root, total_pt_pages) = kernel_page_tables.add_to_image(host)?;
+    let (paging_root, total_pt_pages) = kernel_page_tables.add_to_image(add_page_data)?;
 
     // Allocate memory to hold the kernel launch info block.
     let (launch_info_paddr, launch_info_vaddr) =
@@ -128,7 +131,7 @@ pub fn prepare_boot_image<'a, H: BootImageHost<'a>>(
         vmsa_in_kernel_heap,
         _reserved: Default::default(),
     };
-    add_page_contents(host, launch_info_paddr, launch_info.as_bytes())?;
+    add_page_contents(add_page_data, launch_info_paddr, launch_info.as_bytes())?;
 
     let info = BootImageInfo {
         boot_params_paddr,

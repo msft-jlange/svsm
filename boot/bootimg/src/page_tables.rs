@@ -5,7 +5,6 @@
 // Author: Jon Lange <jlange@microsoft.com>
 
 use crate::BootImageError;
-use crate::BootImageHost;
 use crate::PGTABLE_LVL3_IDX_PTE_SELFMAP;
 use crate::defs::add_page_contents;
 use crate::heap::KernelPageHeap;
@@ -208,20 +207,27 @@ impl KernelPageTables {
         }
     }
 
-    pub fn add_to_image<'a, H: BootImageHost<'a>>(
-        &self,
-        host: &mut H,
-    ) -> Result<(u64, u64), BootImageError> {
-        add_page_contents(host, self.starting_paddr, self.pte_allocation.as_bytes())
-            .and(Ok((self.paging_root, self.total_pt_pages)))
+    pub fn add_to_image<F>(&self, add_page_data: &mut F) -> Result<(u64, u64), BootImageError>
+    where
+        F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+    {
+        add_page_contents(
+            add_page_data,
+            self.starting_paddr,
+            self.pte_allocation.as_bytes(),
+        )
+        .and(Ok((self.paging_root, self.total_pt_pages)))
     }
 }
 
-pub fn setup_kernel_page_tables<'a, H: BootImageHost<'a>>(
+pub fn setup_kernel_page_tables<F>(
     kernel_virt_base: u64,
     kernel_heap: &mut KernelPageHeap,
-    host: &mut H,
-) -> Result<KernelPageTables, BootImageError> {
+    add_page_data: &mut F,
+) -> Result<KernelPageTables, BootImageError>
+where
+    F: FnMut(u64, Option<&[u8]>, u64) -> Result<(), BootImageError>,
+{
     // Calculate the virtual span of the kernel region.  This extends from the
     // base of the kernel virtual address region through the end of the heap.
     let heap_end = kernel_heap.virt_base() + (kernel_heap.page_count() * PAGE_SIZE_4K);
@@ -270,13 +276,13 @@ pub fn setup_kernel_page_tables<'a, H: BootImageHost<'a>>(
         return Err(BootImageError::SelfMapConflict);
     }
     pxe_allocation.set_entry(pml4e_index, pdpt_paddr, PteType::Pxe);
-    add_page_contents(host, paddr, pxe_allocation.as_bytes())?;
+    add_page_contents(add_page_data, paddr, pxe_allocation.as_bytes())?;
 
     paddr += PAGE_SIZE_4K;
     pxe_allocation.reset();
     let pdpe_index = (pte_index(kernel_virt_base, 2) & (PTE_PER_PAGE - 1)) as usize;
     pxe_allocation.set_entry(pdpe_index, paddr + PAGE_SIZE_4K, PteType::Pxe);
-    add_page_contents(host, paddr, pxe_allocation.as_bytes())?;
+    add_page_contents(add_page_data, paddr, pxe_allocation.as_bytes())?;
 
     paddr += PAGE_SIZE_4K;
     let pte_paddr = paddr + PAGE_SIZE_4K;
@@ -286,7 +292,7 @@ pub fn setup_kernel_page_tables<'a, H: BootImageHost<'a>>(
         let pt_addr = pte_paddr + offset as u64;
         pxe_allocation.set_entry(pde_index, pt_addr, PteType::Pxe);
     }
-    add_page_contents(host, paddr, pxe_allocation.as_bytes())?;
+    add_page_contents(add_page_data, paddr, pxe_allocation.as_bytes())?;
 
     Ok(KernelPageTables {
         pte_allocation,
