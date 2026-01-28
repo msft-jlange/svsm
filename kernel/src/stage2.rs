@@ -19,7 +19,6 @@ use bootdefs::kernel_launch::STAGE2_START;
 use bootdefs::kernel_launch::Stage2LaunchInfo;
 use bootdefs::platform::SvsmPlatformType;
 use bootimg::BootImageError;
-use bootimg::BootImageHost;
 use bootimg::BootImageInfo;
 use bootimg::BootImageParams;
 use bootimg::prepare_boot_image;
@@ -95,7 +94,6 @@ impl KernelPageTablePage<'_> {
 
 struct Stage2BootLoader<'a> {
     map_vaddr: VirtAddr,
-    launch_info: &'a Stage2LaunchInfo,
     kernel_region_base: PhysAddr,
     platform: &'a dyn SvsmPlatform,
     boot_params: &'a BootParams<'a>,
@@ -103,7 +101,6 @@ struct Stage2BootLoader<'a> {
 
 impl<'a> Stage2BootLoader<'a> {
     fn new(
-        launch_info: &'a Stage2LaunchInfo,
         kernel_region: &MemoryRegion<PhysAddr>,
         platform: &'a dyn SvsmPlatform,
         boot_params: &'a BootParams<'_>,
@@ -118,7 +115,6 @@ impl<'a> Stage2BootLoader<'a> {
         // conflict with temporary mappings that were created during boot
         // image preparation.
         Self {
-            launch_info,
             kernel_region_base: kernel_region.start(),
             map_vaddr: SVSM_PERTASK_BASE,
             platform,
@@ -133,12 +129,6 @@ impl<'a> Stage2BootLoader<'a> {
         // address in the mapping area.
         let offset = paddr - u64::from(self.kernel_region_base);
         self.map_vaddr + (offset as usize)
-    }
-}
-
-impl<'a> BootImageHost<'a> for Stage2BootLoader<'a> {
-    fn get_kernel_image(&self) -> Result<&'a [u8], BootImageError> {
-        Ok(get_kernel_elf(self.launch_info))
     }
 
     fn add_page_data(
@@ -354,10 +344,17 @@ fn prepare_kernel_image(
     launch_info: &Stage2LaunchInfo,
     boot_params: &BootParams<'_>,
     boot_image_params: &BootImageParams<'_>,
-    boot_image_host: &mut Stage2BootLoader<'_>,
+    boot_loader: &mut Stage2BootLoader<'_>,
 ) -> Result<BootImageInfo, BootImageError> {
+    // Obtain a reference to the kernel image data.
+    let kernel_image_bytes = get_kernel_elf(launch_info);
+
     // Prepare the boot image using the common library.
-    let boot_image_info = prepare_boot_image(boot_image_params, boot_image_host)?;
+    let boot_image_info = prepare_boot_image(
+        boot_image_params,
+        kernel_image_bytes,
+        &mut |paddr, data, len| boot_loader.add_page_data(paddr, data, len),
+    )?;
 
     // No confidentiality bits are present in the kernel page table portion of
     // the boot image.  Therefore, the page tables need to be walked now to
@@ -370,7 +367,7 @@ fn prepare_kernel_image(
             // translation from physical to virtual is known to be correct by
             // construction.
             let mut page_table_page =
-                unsafe { KernelPageTablePage::new(boot_image_host.phys_to_virt(paddr)) };
+                unsafe { KernelPageTablePage::new(boot_loader.phys_to_virt(paddr)) };
             for entry in 0..svsm::mm::pagetable::ENTRY_COUNT {
                 page_table_page.entry_mut(entry).make_private_if_present();
             }
@@ -392,7 +389,7 @@ fn prepare_kernel_image(
 
     // Copy the data into the kernel image as if it had been prepared as part
     // of the boot image.
-    boot_image_host
+    boot_loader
         .add_page_data(
             boot_image_info.boot_params_paddr + boot_params_measured_size as u64,
             Some(unmeasured_slice),
@@ -417,10 +414,10 @@ fn prepare_kernel_image(
         )
     };
 
-    boot_image_host
+    boot_loader
         .add_page_data(boot_image_info.cpuid_paddr, cpuid_slice, PAGE_SIZE as u64)
         .and_then(|_| {
-            boot_image_host.add_page_data(
+            boot_loader.add_page_data(
                 boot_image_info.secrets_paddr,
                 secrets_slice,
                 PAGE_SIZE as u64,
@@ -469,8 +466,7 @@ pub extern "C" fn stage2_main(launch_info: &Stage2LaunchInfo) -> ! {
     log::info!("SVSM memory region: {kernel_region:#018x}");
 
     // Invoke the boot image builder to assemble the kernel image.
-    let mut boot_image_host =
-        Stage2BootLoader::new(launch_info, &kernel_region, platform, &boot_params);
+    let mut boot_image_host = Stage2BootLoader::new(&kernel_region, platform, &boot_params);
     let boot_image_params = BootImageParams {
         boot_params: boot_params.param_block(),
         kernel_region_start: u64::from(kernel_region.start()),
