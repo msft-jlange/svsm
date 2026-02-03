@@ -11,6 +11,7 @@ use bootdefs::tdp_start::TdpStartContext;
 use core::arch::global_asm;
 use core::mem::offset_of;
 use core::panic::PanicInfo;
+use cpuarch::x86::CR4Flags;
 
 global_asm!(
     r#"
@@ -30,16 +31,24 @@ startup:
         testl   %esi, %esi
         jnz     1f
 
+        /* Ensure that 64-bit PTEs are enabled. */
+        movl    %cr4, %eax
+        orl     ${CR4_PAE}, %eax
+        movl    %eax, %cr4
+
         /* %ebx is initialized with GPAW, so calculate the high 32 bits of
          * VTOM as (1u32 << (GPAW - 33)) */
         subl    $33, %ebx
         xorl    %esi, %esi
         bts     %ebx, %esi
 
+        /* Load the TDP platform type for boot loader use. */
+        movl    $2, %eax
+
         /* Begin execution from the specified location */
         movl    {RSP}(%edx), %esp
-        movl    {RIP}(%edx), %eax
-        jmp     *%eax
+        movl    {RIP}(%edx), %ecx
+        jmp     *%ecx
 
     1:
         /* Wait until the current VP is selected for execution. */
@@ -63,6 +72,7 @@ startup:
     VP_INDEX = const offset_of!(TdpStartContext, vp_index),
     RIP = const offset_of!(TdpStartContext, rip),
     RSP = const offset_of!(TdpStartContext, rsp),
+    CR4_PAE = const CR4Flags::PAE.bits(),
     options(att_syntax)
 );
 

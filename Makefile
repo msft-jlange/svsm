@@ -40,6 +40,7 @@ STAGE1_RUSTC_ARGS += -C panic=abort
 
 STAGE1_ELF = "target/x86_64-unknown-none/${TARGET_PATH}/stage1"
 STAGE2_ELF = "target/x86_64-unknown-none/${TARGET_PATH}/stage2"
+BLDR_ELF = "target/x86_64-unknown-none/$(TARGET_PATH)/bldr"
 SVSM_KERNEL_ELF = "target/x86_64-unknown-none/${TARGET_PATH}/svsm"
 TEST_KERNEL_ELF = target/x86_64-unknown-none/${TARGET_PATH}/svsm-test
 FS_BIN=bin/svsm-fs.bin
@@ -132,6 +133,10 @@ docsite:
 docsite-serve:
 	mkdocs serve -f Documentation/mkdocs.yml
 
+bin/bldr.bin: bin
+	cargo build --package bldr $(CARGO_ARGS) --target=x86_64-unknown-none
+	objcopy -O binary $(BLDR_ELF) $@
+
 bin/stage2.bin: bin
 	cargo build --package svsm --bin stage2 ${CARGO_ARGS} --target=x86_64-unknown-none
 	objcopy -O binary ${STAGE2_ELF} $@
@@ -172,9 +177,10 @@ bin/svsm-test.bin: bin/svsm-test
 	objcopy -O binary $< $@
 
 clippy:
-	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --exclude svsm --exclude stage1 --exclude svsm-fuzz -- ${CLIPPY_ARGS}
+	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --exclude svsm --exclude stage1 --exclude svsm-fuzz --exclude bldr -- ${CLIPPY_ARGS}
 	RUSTFLAGS="--cfg fuzzing" cargo clippy ${CLIPPY_OPTIONS} --all-features --package svsm-fuzz -- ${CLIPPY_ARGS}
 	cargo clippy ${CLIPPY_OPTIONS} --all-features --package svsm --target x86_64-unknown-none -- ${CLIPPY_ARGS}
+	cargo clippy ${CLIPPY_OPTIONS} --all-features --package bldr --target x86_64-unknown-none -- ${CLIPPY_ARGS}
 	cargo clippy ${CLIPPY_OPTIONS} --all-features --package stage1 --target x86_64-unknown-none -- ${CLIPPY_ARGS} ${STAGE1_RUSTC_ARGS}
 	cargo clippy ${CLIPPY_OPTIONS} --all-features --workspace --tests --exclude packit -- ${CLIPPY_ARGS}
 
@@ -185,4 +191,4 @@ clean:
 
 distclean: clean
 
-.PHONY: test clean clippy bin/stage2.bin bin/svsm-kernel.elf bin/test-kernel.elf stage1_elf_trampoline distclean $(APROXYBIN) $(IGVM_FILES) $(IGVM_TEST_FILES)
+.PHONY: test clean clippy bin/bldr.bin bin/stage2.bin bin/svsm-kernel.elf bin/test-kernel.elf stage1_elf_trampoline distclean $(APROXYBIN) $(IGVM_FILES) $(IGVM_TEST_FILES) 
