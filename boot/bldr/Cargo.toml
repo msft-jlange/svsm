@@ -1,0 +1,11 @@
+[package]
+name = "bldr"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+cpuarch.workspace = true
+bootdefs.workspace = true
+
+[lints]
+workspace = true
