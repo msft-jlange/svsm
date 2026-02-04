@@ -15,11 +15,11 @@ mod firmware;
 mod gpa_map;
 mod igvm_builder;
 mod igvm_firmware;
+mod initial_stack;
 mod ovmf_firmware;
 mod paging;
 mod platform;
 mod sipi;
-mod stage2_stack;
 mod vmsa;
 
 fn main() -> Result<(), Box<dyn Error>> {
