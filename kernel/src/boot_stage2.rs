@@ -5,15 +5,11 @@
 // Author: Joerg Roedel <jroedel@suse.de>
 
 use core::arch::global_asm;
-
-use svsm::{
-    cpu::{
-        efer::EFERFlags,
-        msr::{EFER, SEV_STATUS},
-    },
-    mm::PGTABLE_LVL3_IDX_PTE_SELFMAP,
-    types::PAGE_SIZE,
-};
+use cpuarch::sev_status::MSR_SEV_STATUS;
+use cpuarch::x86::EFERFlags;
+use cpuarch::x86::MSR_EFER;
+use svsm::mm::PGTABLE_LVL3_IDX_PTE_SELFMAP;
+use svsm::types::PAGE_SIZE;
 
 global_asm!(
     r#"
@@ -288,10 +284,10 @@ global_asm!(
     pgtable_end:"#,
     PAGE_SIZE = const PAGE_SIZE,
     PGTABLE_LVL3_IDX_PTE_SELFMAP = const PGTABLE_LVL3_IDX_PTE_SELFMAP,
-    EFER = const EFER,
+    EFER = const MSR_EFER,
     LME = const EFERFlags::LME.bits(),
     NXE = const EFERFlags::NXE.bits(),
-    SEV_STATUS = const SEV_STATUS,
+    SEV_STATUS = const MSR_SEV_STATUS,
     options(att_syntax)
 );
 
