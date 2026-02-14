@@ -10,8 +10,8 @@ use std::fs;
 
 use bootdefs::boot_params::GuestFwInfoBlock;
 use bootdefs::boot_params::InitialGuestContext;
-use bootdefs::kernel_launch::LOWMEM_END;
-use bootdefs::kernel_launch::STAGE2_HEAP_END;
+use bootdefs::kernel_launch::LOWMEM_PT_COUNT;
+use bootdefs::kernel_launch::LOWMEM_PT_START;
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile};
 use igvm_defs::{
@@ -95,7 +95,8 @@ impl IgvmFirmware {
         igvm_fw.fw_info.start = igvm_fw.lowest_gpa.try_into()?;
         igvm_fw.fw_info.size = (igvm_fw.highest_gpa - igvm_fw.lowest_gpa).try_into()?;
         igvm_fw.fw_info.in_low_memory = 1;
-        if igvm_fw.fw_info.start < LOWMEM_END {
+        let lowmem_end = LOWMEM_PT_START + (LOWMEM_PT_COUNT as u32 * PAGE_SIZE_4K as u32);
+        if igvm_fw.fw_info.start < lowmem_end {
             return Err("IGVM firmware base is lower than 640K".into());
         }
 
@@ -112,8 +113,8 @@ impl IgvmFirmware {
         // Mark the range between the top of the stage 2 heap and the base
         // of memory as a range that needs to be validated.
         igvm_fw.fw_info.prevalidated_count = 1;
-        igvm_fw.fw_info.prevalidated[0].base = STAGE2_HEAP_END;
-        igvm_fw.fw_info.prevalidated[0].size = igvm_fw.fw_info.start - STAGE2_HEAP_END;
+        igvm_fw.fw_info.prevalidated[0].base = 0;
+        igvm_fw.fw_info.prevalidated[0].size = igvm_fw.fw_info.start;
 
         Ok(Box::new(igvm_fw))
     }
