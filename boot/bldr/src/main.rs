@@ -264,7 +264,6 @@ pub extern "C" fn bldr_main(launch_info: &BldrLaunchInfo, vtom: u64) -> ! {
     let kernel_launch_info =
         unsafe { &mut *(launch_info.kernel_launch_info as *mut KernelLaunchInfo) };
 
-    kernel_launch_info.lowmem_page_tables = true;
     kernel_launch_info.vtom = vtom;
 
     // If this is an SNP system, copy the CPUID page from the boot loader

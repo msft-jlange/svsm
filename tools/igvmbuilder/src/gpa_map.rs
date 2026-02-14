@@ -14,13 +14,17 @@ use bootdefs::kernel_launch::BLDR_START;
 use bootdefs::kernel_launch::CPUID_PAGE;
 use bootdefs::kernel_launch::LOWMEM_PT_COUNT;
 use bootdefs::kernel_launch::LOWMEM_PT_START;
+use bootdefs::kernel_launch::SIPI_STUB_GPA;
+use bootdefs::kernel_launch::SIPI_STUB_PT_GPA;
 
 use igvm_defs::PAGE_SIZE_4K;
 
 use crate::boot_params::BootParamLayout;
 use crate::cmd_options::{CmdOptions, Hypervisor};
 use crate::firmware::Firmware;
-use crate::igvm_builder::{COMPATIBILITY_MASK, TDP_COMPATIBILITY_MASK};
+use crate::igvm_builder::ANY_NATIVE_COMPATIBILITY_MASK;
+use crate::igvm_builder::COMPATIBILITY_MASK;
+use crate::igvm_builder::TDP_COMPATIBILITY_MASK;
 
 #[derive(Debug, Copy, Clone)]
 pub struct GpaRange {
@@ -63,6 +67,7 @@ impl GpaRange {
 struct GpaLayoutInfo {
     bldr_image: GpaRange,
     bldr_stack: GpaRange,
+    init_page_tables: GpaRange,
     kernel_fs_start: u64,
 }
 
@@ -84,6 +89,8 @@ pub struct GpaMap {
     pub vmsa: GpaRange,
     pub vmsa_in_kernel_range: bool,
     pub init_page_tables: GpaRange,
+    pub sipi_stub: GpaRange,
+    pub sipi_compat_mask: u32,
 }
 
 impl GpaMap {
@@ -165,6 +172,10 @@ impl GpaMap {
                 bldr_image,
                 bldr_stack: GpaRange::new_page(BLDR_STACK_PAGE.into())?,
                 kernel_fs_start: bldr_image.get_end(),
+                init_page_tables: GpaRange::new(
+                    LOWMEM_PT_START as u64,
+                    LOWMEM_PT_COUNT as u64 * PAGE_SIZE_4K,
+                )?,
             }
         } else {
             let bldr_image = GpaRange::new(BLDR_BASE.into(), 0)?;
@@ -172,6 +183,7 @@ impl GpaMap {
                 bldr_image,
                 bldr_stack: bldr_image,
                 kernel_fs_start: bldr_image.get_end(),
+                init_page_tables: GpaRange::new(0, 0)?,
             }
         };
         // Obtain the length of the kernel filesystem.
@@ -193,6 +205,19 @@ impl GpaMap {
             Hypervisor::HyperV => (GpaRange::new_page(kernel.end - PAGE_SIZE_4K)?, true),
         };
 
+        // If the target includes a non-isolated platform, then insert the
+        // SIPI startup stub.  Also include the SIPI stub with TDX since it is
+        // used for AP startup.
+        let sipi_compat_mask = ANY_NATIVE_COMPATIBILITY_MASK | TDP_COMPATIBILITY_MASK;
+        let sipi_stub = if COMPATIBILITY_MASK.contains(sipi_compat_mask) {
+            GpaRange::new(
+                SIPI_STUB_PT_GPA as u64,
+                SIPI_STUB_GPA as u64 + PAGE_SIZE_4K - SIPI_STUB_PT_GPA as u64,
+            )?
+        } else {
+            GpaRange::new(0, 0)?
+        };
+
         let gpa_map = Self {
             base_addr: BLDR_BASE.into(),
             stage1_image,
@@ -204,12 +229,11 @@ impl GpaMap {
             kernel,
             kernel_min_size,
             kernel_max_size,
+            sipi_stub,
+            sipi_compat_mask,
             vmsa,
             vmsa_in_kernel_range,
-            init_page_tables: GpaRange::new(
-                LOWMEM_PT_START as u64,
-                LOWMEM_PT_COUNT as u64 * PAGE_SIZE_4K,
-            )?,
+            init_page_tables: gpa_layout_info.init_page_tables,
         };
         if options.verbose {
             println!("GPA Map: {gpa_map:#X?}");
