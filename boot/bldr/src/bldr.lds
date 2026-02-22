@@ -14,7 +14,8 @@ SECTIONS
 	. = 64k;
 	.stext = .;
 	.text : {
-		*(.startup.*)
+		*(.startup16.*)
+		*(.startup32.*)
 		*(.text)
 		*(.text.*)
 		. = ALIGN(16);
@@ -48,4 +49,4 @@ SECTIONS
 	.rodata : { *(.rodata) }
 }
 
-ENTRY(startup_32)
+ENTRY(base_entry)
