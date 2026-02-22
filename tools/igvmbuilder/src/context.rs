@@ -380,6 +380,9 @@ pub fn construct_stage1_image(
         }
     }
 
+    // The AP entry point is two bytes beyond the standard entry point.
+    tdp_context.ap_entry = tdp_context.rip + 2;
+
     // Load the stage1 image.  It must be exactly one page in size.
     let mut stage1_image = fs::read(stage1_path)?;
     if stage1_image.len() != PAGE_SIZE_4K as usize {

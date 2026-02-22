@@ -7,6 +7,7 @@
 #![no_std]
 #![no_main]
 
+use bootdefs::kernel_launch::ApStartContext;
 use bootdefs::kernel_launch::BldrLaunchInfo;
 use bootdefs::kernel_launch::KernelLaunchInfo;
 use bootdefs::platform::SvsmPlatformType;
@@ -22,12 +23,62 @@ use cpuarch::x86::MSR_EFER;
 
 global_asm!(
     r#"
+        /* The startup code has a very specific layout which is expected by
+         * other assembly components.
+         * 10000: 16-bit SIPI entry point
+         * 10002: 32-bit BSP entry point
+         * 10004: 32-bit AP entry point
+         */
         .text
-        .section .startup.text,"ax"
-        .code32
+        .section .startup16.text,"ax"
+        .code16gcc
 
-        .globl startup_32
-        startup_32:
+        .globl base_entry
+    base_entry:
+        jmp startup_16
+        jmp startup_32_bsp
+        jmp startup_32_ap
+        nop
+        nop
+
+    gdt_desc:
+        .word	gdt_end - gdt_start - 1
+        .long	gdt_start
+        .align  8
+    gdt_start:
+        .quad	0
+        .quad	0x00cf9b000000ffff // flat 32-bit code segment
+        .quad	0x00cf93000000ffff // flat data segment
+        .quad	0x00af9b000000ffff // 64-bit code segment
+    gdt_end:
+
+    startup_16:
+        movl %cr0, %eax
+        orl $1, %eax // enable protected mode
+        movl %eax, %cr0
+        lgdtl %cs:0x10000 + gdt_desc - base_entry
+        ljmpl $8, $startup_ap
+
+        /* These jumps into 32-bit code are executed in 32-bit mode but they
+         * are assembled as 16-bit code, which means the displacement values
+         * are generated as 16 bits instead of 32 bits.  Emit an extra 16 zero
+         * bits so the displacement is correctly interpreted when executing in
+         * 32-bit mode, and adjust the target address back by two bytes to
+         * account for the difference in instruction size that is used when
+         * calculating the displacement. */
+    startup_32_bsp:
+        jmp startup_bsp - 2
+        .word 0
+
+    startup_32_ap:
+        jmp startup_ap_no_gdt - 2
+        .word 0
+
+        .code32
+        .section .startup32.text,"ax"
+
+        .globl startup_bsp
+    startup_bsp:
 
         /* Upon entry, ESI holds the high 32 bits of VTOM. */
 
@@ -37,6 +88,11 @@ global_asm!(
         /* Save the platform type for future use.  The platform type is loaded
          * in EAX upon entry. */
         movl %eax, {PLATFORM}(%ebp)
+
+        /* Capture the address of the AP start context in case it is needed
+         * later. */
+        movl $ap_ctxt_ptr, %eax
+        movl %eax, {AP_CTXT_ADDR}(%ebp)
 
         /* Check to see whether this is an SNP system.  If not, no page table
          * manipulation is required. */
@@ -105,22 +161,65 @@ global_asm!(
         orl $({EFER_LME} | {EFER_NXE}), %eax
         wrmsr
     3:
-        /* Enable paging so that long mode can be activated. */
+        /* Save the paging root for AP startup. */
         movl {PT_ROOT}(%ebp), %edx
+        movl %edx, transition_pt_root
+
+        /* Enable paging so that long mode can be activated. */
         movl %edx, %cr3
         movl %cr0, %eax
         bts $31, %eax
         movl %eax, %cr0
 
         /* Establish the correct GDT and jump to the 64-bit entry point. */
-        movl $gdt64_desc, %eax
+        movl $gdt_desc, %eax
         lgdt (%eax)
-        ljmpl $0x8, $startup_64
+        ljmpl $0x18, $startup_64
+
+    startup_ap_no_gdt:
+        movl $gdt_desc, %eax
+        lgdt (%eax)
+        ljmpl $8, $startup_ap
+
+    startup_ap:
+        /* Reload the data segment descriptors. */
+        movw $0x10, %ax
+        movw %ax, %ds
+        movw %ax, %es
+        movw %ax, %fs
+        movw %ax, %gs
+        movw %ax, %ss
+
+        /* Enable long mode. */
+        movl ${MSR_EFER}, %ecx
+        rdmsr
+
+        /* Don't write the MSR if EFER_LME is already set.  This is required
+         * for certain versions of the TDX module. */
+        testl ${EFER_LME}, %eax
+        jnz 5f
+
+        /* Include NXE as well. */
+        orl $({EFER_LME} | {EFER_NXE}), %eax
+        wrmsr
+    5:
+        /* Enable paging using the transition page table */
+        movl $ap_ctxt_ptr, %edi
+        movl transition_pt_root, %eax
+        movl %eax, %cr3
+        movl %cr0, %eax
+        bts $31, %eax
+        movl %eax, %cr0
+
+        /* Jump to 64-bit code and then proceed to the entry point. */
+        ljmpl $18, $start_ap_64
 
         .code64
+    start_ap_64:
+        jmp *{AP_START_RIP}(%edi)
 
     startup_64:
-        /* Reload the data segments with 64bit descriptors. */
+        /* Reload the data segment descriptors. */
         movw $0x10, %ax
         movw %ax, %ds
         movw %ax, %es
@@ -169,16 +268,11 @@ global_asm!(
         ud2
 
         .data
-        .align 16
-    gdt64:
-        .quad 0
-        .quad 0x00af9a000000ffff /* 64 bit code segment */
-        .quad 0x00cf92000000ffff /* 64 bit data segment */
-    gdt64_end:
+    ap_ctxt_ptr:
+        .long 0
 
-    gdt64_desc:
-        .word gdt64_end - gdt64 - 1
-        .quad gdt64
+    transition_pt_root:
+        .long 0
 
         "#,
     MSR_EFER = const MSR_EFER,
@@ -192,6 +286,8 @@ global_asm!(
     CPUID_PAGE = const offset_of!(BldrLaunchInfo, cpuid_addr) as u32,
     PLATFORM = const offset_of!(BldrLaunchInfo, platform_type) as u32,
     C_BIT_POS = const offset_of!(BldrLaunchInfo, c_bit_position) as u32,
+    AP_CTXT_ADDR = const offset_of!(BldrLaunchInfo, ap_start_context_addr) as u32,
+    AP_START_RIP = const offset_of!(ApStartContext, start_rip) as u32,
     options(att_syntax)
 );
 
