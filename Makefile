@@ -57,7 +57,7 @@ else
 BUILD_FW =
 endif
 
-IGVM_FILES = bin/coconut-qemu.igvm bin/coconut-hyperv.igvm bin/coconut-vanadium.igvm
+IGVM_FILES = bin/coconut-qemu.igvm bin/coconut-hyperv.igvm bin/coconut-vanadium.igvm bin/osbuild.igvm
 IGVM_TEST_FILES = bin/coconut-test-qemu.igvm bin/coconut-test-hyperv.igvm bin/coconut-test-vanadium.igvm
 IGVMBUILDER = "target/${TARGET_PATH}/igvmbuilder"
 IGVMBIN = bin/igvmbld
@@ -75,6 +75,8 @@ all: igvm
 aproxy: $(APROXY) $(APROXYBIN)
 
 igvm: $(IGVM_FILES) $(IGVMBIN) $(IGVMMEASUREBIN)
+
+osbuild: bin/coconut-osbuild.igvm
 
 bin:
 	mkdir -v -p bin
@@ -105,6 +107,9 @@ bin/coconut-hyperv.igvm:
 
 bin/coconut-vanadium.igvm:
 	cargo xbuild $(XBUILD_ARGS) ./configs/vanadium-target.json
+
+bin/coconut-osbuild.igvm:
+	cargo xbuild ./configs/osbuild-target.json
 
 bin/coconut-test-qemu.igvm:
 	cargo xbuild $(XBUILD_ARGS_TEST) ./configs/test/qemu-test-target.json
@@ -185,4 +190,4 @@ clean:
 
 distclean: clean
 
-.PHONY: test miri clean clippy bin/stage2.bin bin/svsm-kernel.elf bin/test-kernel.elf stage1_elf_trampoline distclean $(APROXYBIN) $(IGVM_FILES) $(IGVM_TEST_FILES)
+.PHONY: osbuild test miri clean clippy bin/stage2.bin bin/svsm-kernel.elf bin/test-kernel.elf stage1_elf_trampoline distclean $(APROXYBIN) $(IGVM_FILES) $(IGVM_TEST_FILES)

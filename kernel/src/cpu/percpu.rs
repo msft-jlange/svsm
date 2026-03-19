@@ -13,38 +13,67 @@ use super::msr::write_msr;
 use super::shadow_stack::{ISST_ADDR, init_shadow_stack, is_cet_ss_enabled, is_cet_ss_supported};
 use super::tss::{IST_DF, X86Tss};
 use crate::address::{Address, PhysAddr, VirtAddr};
+use crate::cpu::IrqGuard;
+use crate::cpu::IrqState;
+use crate::cpu::ShadowStackInit;
+#[cfg(feature = "svsm")]
+use crate::cpu::apic::LocalApic;
 use crate::cpu::control_regs::{read_cr0, read_cr4};
 use crate::cpu::efer::read_efer;
+#[cfg(feature = "svsm")]
 use crate::cpu::idt::common::INT_INJ_VECTOR;
 use crate::cpu::tss::TSS_LIMIT;
-use crate::cpu::vmsa::{init_guest_vmsa, init_svsm_vmsa};
+#[cfg(feature = "svsm")]
+use crate::cpu::vmsa::init_guest_vmsa;
+use crate::cpu::vmsa::init_svsm_vmsa;
 use crate::cpu::vmsa::{svsm_code_segment, svsm_data_segment, svsm_gdt_segment, svsm_idt_segment};
 use crate::cpu::x86::{ApicAccess, X86Apic};
-use crate::cpu::{IrqGuard, IrqState, LocalApic, ShadowStackInit};
-use crate::error::{ApicError, SvsmError};
+#[cfg(feature = "svsm")]
+use crate::error::ApicError;
+use crate::error::SvsmError;
 use crate::hyperv::{self, HypercallPage};
 use crate::hyperv::{HypercallPagesGuard, IS_HYPERV};
-use crate::locking::{
-    LockGuard, RWLock, RWLockIrqSafe, ReadLockGuard, ReadLockGuardIrqSafe, SpinLock,
-    WriteLockGuard, WriteLockGuardIrqSafe,
-};
+#[cfg(feature = "svsm")]
+use crate::locking::LockGuard;
+use crate::locking::RWLock;
+use crate::locking::RWLockIrqSafe;
+use crate::locking::ReadLockGuard;
+use crate::locking::ReadLockGuardIrqSafe;
+#[cfg(feature = "svsm")]
+use crate::locking::SpinLock;
+use crate::locking::WriteLockGuard;
+use crate::locking::WriteLockGuardIrqSafe;
+use crate::mm::PageBox;
+use crate::mm::SVSM_CONTEXT_SWITCH_SHADOW_STACK;
+use crate::mm::SVSM_CONTEXT_SWITCH_STACK;
+use crate::mm::SVSM_PERCPU_BASE;
+#[cfg(feature = "svsm")]
+use crate::mm::SVSM_PERCPU_CAA_BASE;
+use crate::mm::SVSM_PERCPU_END;
+use crate::mm::SVSM_PERCPU_TEMP_BASE_2M;
+use crate::mm::SVSM_PERCPU_TEMP_BASE_4K;
+use crate::mm::SVSM_PERCPU_TEMP_END_2M;
+use crate::mm::SVSM_PERCPU_TEMP_END_4K;
+#[cfg(feature = "svsm")]
+use crate::mm::SVSM_PERCPU_VMSA_BASE;
+use crate::mm::SVSM_SHADOW_STACK_ISST_DF_BASE;
+use crate::mm::SVSM_SHADOW_STACKS_INIT_TASK;
+use crate::mm::SVSM_STACK_IST_DF_BASE;
 use crate::mm::page_visibility::SharedBox;
 use crate::mm::pagetable::{PTEntryFlags, PageTable};
+use crate::mm::virt_to_phys;
 use crate::mm::virtualrange::VirtualRange;
 use crate::mm::vm::{Mapping, VMKernelStack, VMPhysMem, VMR, VMRMapping, VMReserved};
-use crate::mm::{
-    PageBox, SVSM_CONTEXT_SWITCH_SHADOW_STACK, SVSM_CONTEXT_SWITCH_STACK, SVSM_PERCPU_BASE,
-    SVSM_PERCPU_CAA_BASE, SVSM_PERCPU_END, SVSM_PERCPU_TEMP_BASE_2M, SVSM_PERCPU_TEMP_BASE_4K,
-    SVSM_PERCPU_TEMP_END_2M, SVSM_PERCPU_TEMP_END_4K, SVSM_PERCPU_VMSA_BASE,
-    SVSM_SHADOW_STACK_ISST_DF_BASE, SVSM_SHADOW_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
-    virt_to_phys,
-};
-use crate::platform::{SVSM_PLATFORM, SvsmPlatform};
+#[cfg(feature = "svsm")]
+use crate::platform::SVSM_PLATFORM;
+use crate::platform::SvsmPlatform;
+#[cfg(feature = "svsm")]
 use crate::requests::SvsmCaa;
 use crate::sev::ghcb::{GHCB, GhcbPage};
 use crate::sev::hv_doorbell::{HVDoorbell, allocate_hv_doorbell_page};
 use crate::sev::utils::RMPFlags;
-use crate::sev::vmsa::{VMSAControl, VmsaPage};
+use crate::sev::vmsa::VMSAControl;
+use crate::sev::vmsa::VmsaPage;
 use crate::task::{
     KernelThreadStartInfo, RunQueue, Task, TaskPointer, schedule, schedule_task, scheduler_idle,
 };
@@ -61,9 +90,12 @@ use core::arch::asm;
 use core::cell::UnsafeCell;
 use core::mem::size_of;
 use core::ops::Deref;
-use core::ptr::{self, NonNull};
+use core::ptr;
+#[cfg(feature = "svsm")]
+use core::ptr::NonNull;
 use core::slice::Iter;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+#[cfg(feature = "svsm")]
 use cpuarch::vmsa::VMSA;
 
 // PERCPU areas virtual addresses into shared memory
@@ -183,6 +215,7 @@ impl IstStacks {
     }
 }
 
+#[cfg(feature = "svsm")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GuestVmsaRef {
     vmsa: Option<PhysAddr>,
@@ -191,6 +224,7 @@ pub struct GuestVmsaRef {
     gen_in_use: u64,
 }
 
+#[cfg(feature = "svsm")]
 impl GuestVmsaRef {
     pub const fn new() -> Self {
         GuestVmsaRef {
@@ -255,6 +289,7 @@ impl GuestVmsaRef {
 pub struct PerCpuShared {
     apic_id: u32,
     cpu_index: usize,
+    #[cfg(feature = "svsm")]
     guest_vmsa: SpinLock<GuestVmsaRef>,
     online: AtomicBool,
     ipi_irr: [AtomicU32; 8],
@@ -269,6 +304,7 @@ impl PerCpuShared {
         PerCpuShared {
             apic_id,
             cpu_index,
+            #[cfg(feature = "svsm")]
             guest_vmsa: SpinLock::new(GuestVmsaRef::new()),
             online: AtomicBool::new(false),
             ipi_irr: core::array::from_fn(|_| AtomicU32::new(0)),
@@ -284,33 +320,6 @@ impl PerCpuShared {
 
     pub const fn cpu_index(&self) -> usize {
         self.cpu_index
-    }
-
-    pub fn update_guest_vmsa_caa(&self, vmsa: PhysAddr, caa: PhysAddr) {
-        let mut locked = self.guest_vmsa.lock();
-        locked.update_vmsa_caa(Some(vmsa), Some(caa));
-    }
-
-    pub fn update_guest_vmsa(&self, vmsa: PhysAddr) {
-        let mut locked = self.guest_vmsa.lock();
-        locked.update_vmsa(Some(vmsa));
-    }
-
-    pub fn update_guest_caa(&self, caa: PhysAddr) {
-        let mut locked = self.guest_vmsa.lock();
-        locked.update_caa(Some(caa));
-    }
-
-    pub fn clear_guest_vmsa_if_match(&self, paddr: PhysAddr) {
-        let mut locked = self.guest_vmsa.lock();
-        if locked.vmsa.is_none() {
-            return;
-        }
-
-        let vmsa_phys = locked.vmsa_phys();
-        if vmsa_phys.unwrap() == paddr {
-            locked.update_vmsa(None);
-        }
     }
 
     pub fn set_online(&self) {
@@ -352,6 +361,36 @@ impl PerCpuShared {
     /// `IpiState` are followed.
     pub unsafe fn ipi_state(&self) -> &IpiState {
         &self.ipi_state
+    }
+}
+
+#[cfg(feature = "svsm")]
+impl PerCpuShared {
+    pub fn update_guest_vmsa_caa(&self, vmsa: PhysAddr, caa: PhysAddr) {
+        let mut locked = self.guest_vmsa.lock();
+        locked.update_vmsa_caa(Some(vmsa), Some(caa));
+    }
+
+    pub fn update_guest_vmsa(&self, vmsa: PhysAddr) {
+        let mut locked = self.guest_vmsa.lock();
+        locked.update_vmsa(Some(vmsa));
+    }
+
+    pub fn update_guest_caa(&self, caa: PhysAddr) {
+        let mut locked = self.guest_vmsa.lock();
+        locked.update_caa(Some(caa));
+    }
+
+    pub fn clear_guest_vmsa_if_match(&self, paddr: PhysAddr) {
+        let mut locked = self.guest_vmsa.lock();
+        if locked.vmsa.is_none() {
+            return;
+        }
+
+        let vmsa_phys = locked.vmsa_phys();
+        if vmsa_phys.unwrap() == paddr {
+            locked.update_vmsa(None);
+        }
     }
 }
 
@@ -400,6 +439,7 @@ where
     /// Task list that has been assigned for scheduling on this CPU
     runqueue: RWLockIrqSafe<RunQueue>,
     /// Local APIC state for APIC emulation if enabled
+    #[cfg(feature = "svsm")]
     guest_apic: RWLock<Option<LocalApic>>,
 
     /// GHCB page for this CPU.
@@ -439,6 +479,7 @@ impl PerCpu {
             vrange_4k: RWLock::new(VirtualRange::new()),
             vrange_2m: RWLock::new(VirtualRange::new()),
             runqueue: RWLockIrqSafe::new(RunQueue::new()),
+            #[cfg(feature = "svsm")]
             guest_apic: RWLock::new(None),
 
             shared,
@@ -946,7 +987,10 @@ impl PerCpu {
 
         Ok((vmsa.paddr(), vmsa.sev_features))
     }
+}
 
+#[cfg(feature = "svsm")]
+impl PerCpu {
     fn unmap_guest_vmsa(&self) {
         assert!(self.shared().cpu_index == this_cpu().get_cpu_index());
         // Ignore errors - the mapping might or might not be there
@@ -1123,7 +1167,9 @@ impl PerCpu {
             .configure_vector(vector, allowed);
         Ok(())
     }
+}
 
+impl PerCpu {
     fn svsm_tr_segment(&self) -> hyperv::HvSegmentRegister {
         hyperv::HvSegmentRegister {
             selector: SVSM_TSS,
@@ -1414,6 +1460,7 @@ impl PerCpuVmsas {
             .position(|vmsa| vmsa.paddr == paddr && vmsa.in_use == in_use)
             .ok_or(0u64)?;
 
+        #[cfg(feature = "svsm")]
         if in_use {
             let vmsa = &guard[index];
 

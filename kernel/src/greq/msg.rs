@@ -119,11 +119,7 @@ impl SnpGuestRequestMsgHdr {
     }
 
     /// Validate the [`SnpGuestRequestMsgHdr`] fields
-    fn validate(
-        &self,
-        msg_type: SnpGuestRequestMsgType,
-        msg_seqno: u64,
-    ) -> Result<(), SvsmError> {
+    fn validate(&self, msg_type: SnpGuestRequestMsgType, msg_seqno: u64) -> Result<(), SvsmError> {
         if self.hdr_version != HDR_VERSION
             || self.hdr_sz != MSG_HDR_SIZE as u16
             || self.algo != SnpGuestRequestAead::Aes256Gcm as u8

@@ -1,20 +1,20 @@
 {
     "igvm": {
-        "qemu": {
-            "output": "coconut-test-qemu.igvm",
+        "hyper-v": {
+            "output": "coconut-osbuild.igvm",
             "platforms": [
                 "snp",
                 "tdp",
                 "native"
             ],
+            "policy": "0x30000",
+            "comport": "3",
             "measure": "print"
         }
     },
     "kernel": {
         "svsm": {
-	    "features": "svsm",
-            "type": "make",
-            "output_file": "bin/test-kernel.elf"
+            "binary": false
         },
         "stage2": {
             "manifest": "kernel/Cargo.toml",
@@ -27,8 +27,11 @@
             "objcopy": "binary"
         }
     },
-    "firmware": {},
     "fs": {
-        "modules": {}
+        "modules": {
+            "userinit": {
+                "path": "/init"
+            }
+        }
     }
 }

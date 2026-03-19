@@ -11,10 +11,12 @@ use super::PlatformPageType;
 use super::Stage2Platform;
 use super::SvsmPlatform;
 use super::capabilities::Caps;
+#[cfg(feature = "svsm")]
 use super::snp_fw::{
     copy_tables_to_fw, launch_fw, prepare_fw_launch, print_fw_meta, validate_fw, validate_fw_memory,
 };
 use crate::address::{Address, PhysAddr, VirtAddr};
+#[cfg(feature = "svsm")]
 use crate::boot_params::BootParams;
 use crate::console::init_svsm_console;
 use crate::cpu::cpuid::CpuidResult;
@@ -33,6 +35,7 @@ use crate::mm::PAGE_SIZE;
 use crate::mm::PAGE_SIZE_2M;
 use crate::mm::PerCPUPageMappingGuard;
 use crate::mm::TransitionPageTable;
+#[cfg(feature = "svsm")]
 use crate::mm::memory::write_guest_memory_map;
 use crate::platform::IrqGuard;
 use crate::sev::ghcb::GHCBIOSize;
@@ -191,6 +194,7 @@ impl SvsmPlatform for SnpPlatform {
         // be freed.
     }
 
+    #[cfg(feature = "svsm")]
     fn prepare_fw(
         &self,
         boot_params: &BootParams<'_>,
@@ -212,6 +216,7 @@ impl SvsmPlatform for SnpPlatform {
         Ok(())
     }
 
+    #[cfg(feature = "svsm")]
     fn launch_fw(&self, boot_params: &BootParams<'_>) -> Result<(), SvsmError> {
         if boot_params.should_launch_fw() {
             launch_fw(boot_params)

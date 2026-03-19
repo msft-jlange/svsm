@@ -36,7 +36,9 @@ pub mod kernel_region;
 pub mod locking;
 pub mod mm;
 pub mod platform;
+#[cfg(feature = "svsm")]
 pub mod protocols;
+#[cfg(feature = "svsm")]
 pub mod requests;
 pub mod serial;
 pub mod sev;
@@ -48,6 +50,7 @@ pub mod types;
 pub mod utils;
 #[cfg(feature = "virtio-drivers")]
 pub mod virtio;
+#[cfg(feature = "svsm")]
 pub mod vmm;
 #[cfg(all(feature = "vtpm", not(test)))]
 pub mod vtpm;

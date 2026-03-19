@@ -12,7 +12,11 @@ use crate::cpu::efer::EFERFlags;
 use crate::error::SvsmError;
 use crate::mm::alloc::free_multiple_pages;
 use crate::mm::{GuestPtr, PAGE_SIZE, PerCPUPageMappingGuard};
-use crate::platform::{PageStateChangeOp, PageValidateOp, SVSM_PLATFORM, SevFWMetaData};
+use crate::platform::PageStateChangeOp;
+use crate::platform::PageValidateOp;
+use crate::platform::SVSM_PLATFORM;
+#[cfg(feature = "svsm")]
+use crate::platform::SevFWMetaData;
 use crate::utils::{MemoryRegion, page_align_up, round_to_pages};
 use alloc::vec::Vec;
 use bootdefs::boot_params::BootParamBlock;
@@ -297,6 +301,7 @@ impl BootParams<'_> {
         self.boot_param_block.debug_serial_port
     }
 
+    #[cfg(feature = "svsm")]
     pub fn get_fw_metadata(&self) -> Option<SevFWMetaData> {
         if !self.should_launch_fw() {
             return None;

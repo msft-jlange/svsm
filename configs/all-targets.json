@@ -35,7 +35,7 @@
     },
     "kernel": {
         "svsm": {
-            "features": "vtpm,enable-gdb",
+            "features": "svsm,vtpm,enable-gdb",
             "binary": false
         },
         "stage2": {

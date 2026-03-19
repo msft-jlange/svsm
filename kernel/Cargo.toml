@@ -75,6 +75,7 @@ test.workspace = true
 attest = ["dep:aes-kw", "dep:cocoon-tpm-crypto", "dep:cocoon-tpm-tpm2-interface", "dep:cocoon-tpm-utils-common", "dep:concat-kdf", "dep:kbs-types", "dep:libaproxy", "dep:serde", "dep:serde_json"]
 
 default = []
+svsm = []
 enable-gdb = ["dep:gdbstub", "dep:gdbstub_arch"]
 vtpm = ["dep:libtcgtpm"]
 nosmep = []

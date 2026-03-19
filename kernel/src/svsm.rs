@@ -64,7 +64,8 @@ use svsm::platform::init_platform_type;
 use svsm::sev::secrets_page_mut;
 use svsm::svsm_paging::enumerate_early_boot_regions;
 use svsm::svsm_paging::invalidate_early_boot_memory;
-use svsm::task::{KernelThreadStartInfo, schedule_init, start_kernel_task};
+use svsm::task::KernelThreadStartInfo;
+use svsm::task::schedule_init;
 use svsm::types::PAGE_SIZE;
 use svsm::utils::MemoryRegion;
 use svsm::utils::ScopedMut;
@@ -520,6 +521,7 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
     invalidate_early_boot_memory(&**SVSM_PLATFORM, &boot_params, &early_boot_regions)
         .expect("Failed to invalidate early boot memory");
 
+    #[cfg(feature = "svsm")]
     if let Err(e) = SVSM_PLATFORM.prepare_fw(&boot_params, kernel_region) {
         panic!("Failed to prepare guest FW: {e:#?}");
     }
@@ -541,12 +543,15 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
     #[cfg(feature = "virtio-drivers")]
     initialize_virtio_mmio(&boot_params).expect("Failed to initialize virtio-mmio drivers");
 
+    #[cfg(feature = "svsm")]
     if let Err(e) = SVSM_PLATFORM.launch_fw(&boot_params) {
         panic!("Failed to launch FW: {e:?}");
     }
 
     #[cfg(test)]
     {
+        use svsm::task::start_kernel_task;
+
         if boot_params.has_qemu_testdev() {
             crate::testutils::set_has_qemu_testdev();
         }
@@ -559,11 +564,12 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
         );
     }
 
-    #[cfg(not(test))]
+    #[cfg(all(not(test), feature = "svsm"))]
     {
         use svsm::fs::opendir;
         use svsm::requests::request_loop_start;
         use svsm::task::exec_user;
+        use svsm::task::start_kernel_task;
 
         match exec_user("/init", opendir("/").expect("Failed to find FS root")) {
             Ok(_) => (),

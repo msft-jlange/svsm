@@ -10,7 +10,9 @@ pub mod native;
 pub mod snp;
 pub mod tdp;
 
+#[cfg(feature = "svsm")]
 mod snp_fw;
+#[cfg(feature = "svsm")]
 pub use snp_fw::SevFWMetaData;
 
 use capabilities::Caps;
@@ -23,6 +25,7 @@ use core::fmt::Debug;
 use core::mem::MaybeUninit;
 
 use crate::address::{PhysAddr, VirtAddr};
+#[cfg(feature = "svsm")]
 use crate::boot_params::BootParams;
 use crate::cpu::IrqGuard;
 use crate::cpu::cpuid::CpuidResult;
@@ -128,6 +131,7 @@ pub trait SvsmPlatform: Sync {
     }
 
     /// Performs the necessary preparations for launching guest boot firmware.
+    #[cfg(feature = "svsm")]
     fn prepare_fw(
         &self,
         _boot_params: &BootParams<'_>,
@@ -137,6 +141,7 @@ pub trait SvsmPlatform: Sync {
     }
 
     /// Launches guest boot firmware.
+    #[cfg(feature = "svsm")]
     fn launch_fw(&self, _boot_params: &BootParams<'_>) -> Result<(), SvsmError> {
         Ok(())
     }

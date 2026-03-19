@@ -231,9 +231,7 @@ impl SnpGuestRequestDriver {
         self.encrypt_request(msg_type, msg_seqno, buffer, command_len)?;
 
         if let Err(e) = self.send(req_class) {
-            if let SvsmError::Ghcb(GhcbError::VmgexitError(_rbx, info2)) =
-                e
-            {
+            if let SvsmError::Ghcb(GhcbError::VmgexitError(_rbx, info2)) = e {
                 // For some reason the hypervisor did not forward the request to the PSP.
                 //
                 // Because the message sequence number is used as part of the AES-GCM IV, it is important that the
@@ -344,8 +342,7 @@ pub fn send_regular_guest_request(
     request_len: usize,
 ) -> Result<usize, SvsmError> {
     let mut cell = GREQ_DRIVER.lock();
-    let driver: &mut SnpGuestRequestDriver =
-        cell.get_mut().ok_or(SvsmError::NotSupported)?;
+    let driver: &mut SnpGuestRequestDriver = cell.get_mut().ok_or(SvsmError::NotSupported)?;
     driver.send_regular_guest_request(msg_type, buffer, request_len)
 }
 
@@ -358,7 +355,6 @@ pub fn send_extended_guest_request(
     certs: &mut [u8],
 ) -> Result<usize, SvsmError> {
     let mut cell = GREQ_DRIVER.lock();
-    let driver: &mut SnpGuestRequestDriver =
-        cell.get_mut().ok_or(SvsmError::NotSupported)?;
+    let driver: &mut SnpGuestRequestDriver = cell.get_mut().ok_or(SvsmError::NotSupported)?;
     driver.send_extended_guest_request(msg_type, buffer, request_len, certs)
 }
