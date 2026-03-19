@@ -6,8 +6,10 @@
 
 use crate::address::VirtAddr;
 use crate::locking::{RWLock, ReadLockGuard, WriteLockGuard};
+#[cfg(feature = "svsm")]
 use crate::protocols::core::CORE_PROTOCOL_VERSION_MAX;
 use crate::sev::vmsa::VMPL_MAX;
+#[cfg(feature = "svsm")]
 use crate::types::GUEST_VMPL;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
 
@@ -114,6 +116,7 @@ impl SecretsPage {
         sp
     }
 
+    #[cfg(feature = "svsm")]
     pub fn set_svsm_data(&mut self, base: u64, size: u64, caa_addr: u64) {
         self.svsm_base = base;
         self.svsm_size = size;

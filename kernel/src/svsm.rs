@@ -7,8 +7,6 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
-extern crate alloc;
-
 use bootdefs::kernel_launch::KernelLaunchInfo;
 use bootdefs::kernel_launch::LOWMEM_END;
 use bootdefs::platform::SvsmPlatformType;
@@ -65,7 +63,8 @@ use svsm::platform::init_platform_type;
 use svsm::sev::secrets_page_mut;
 use svsm::svsm_paging::enumerate_early_boot_regions;
 use svsm::svsm_paging::invalidate_early_boot_memory;
-use svsm::task::{KernelThreadStartInfo, schedule_init, start_kernel_task};
+use svsm::task::KernelThreadStartInfo;
+use svsm::task::schedule_init;
 use svsm::types::PAGE_SIZE;
 use svsm::utils::MemoryRegion;
 use svsm::utils::ScopedMut;
@@ -75,7 +74,6 @@ use svsm::virtio::probe_mmio_slots;
 #[cfg(all(feature = "vtpm", not(test)))]
 use svsm::vtpm::vtpm_init;
 
-use alloc::string::String;
 use release::COCONUT_VERSION;
 
 #[cfg(feature = "attest")]
@@ -548,13 +546,13 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
     // Make ro_after_init section read-only
     make_ro_after_init().expect("Failed to make ro_after_init region read-only");
 
-    let kernel_region = new_kernel_region(launch_info);
     let early_boot_regions = enumerate_early_boot_regions(&boot_params, launch_info);
 
     invalidate_early_boot_memory(&**SVSM_PLATFORM, &boot_params, &early_boot_regions)
         .expect("Failed to invalidate early boot memory");
 
-    if let Err(e) = SVSM_PLATFORM.prepare_fw(&boot_params, kernel_region) {
+    #[cfg(feature = "svsm")]
+    if let Err(e) = SVSM_PLATFORM.prepare_fw(&boot_params, new_kernel_region(launch_info)) {
         panic!("Failed to prepare guest FW: {e:#?}");
     }
 
@@ -575,12 +573,17 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
 
     virt_log_usage();
 
+    #[cfg(feature = "svsm")]
     if let Err(e) = SVSM_PLATFORM.launch_fw(&boot_params) {
         panic!("Failed to launch FW: {e:?}");
     }
 
     #[cfg(test)]
     {
+        use svsm::task::start_kernel_task;
+        extern crate alloc;
+        use alloc::string::String;
+
         if boot_params.has_qemu_testdev() {
             crate::testutils::set_has_qemu_testdev();
         }
@@ -596,7 +599,6 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
     #[cfg(not(test))]
     {
         use svsm::fs::opendir;
-        use svsm::requests::request_loop_start;
         use svsm::task::exec_user;
 
         match exec_user("/init", opendir("/").expect("Failed to find FS root")) {
@@ -604,13 +606,21 @@ fn svsm_init(launch_info: &KernelLaunchInfo) {
             Err(e) => log::info!("Failed to launch /init: {e:?}"),
         }
 
-        // Start request processing on this CPU if required.
-        if SVSM_PLATFORM.start_svsm_request_loop() {
-            start_kernel_task(
-                KernelThreadStartInfo::new(request_loop_start, 0),
-                String::from("request-loop on CPU 0"),
-            )
-            .expect("Failed to launch request loop task");
+        #[cfg(feature = "svsm")]
+        {
+            use svsm::requests::request_loop_start;
+            use svsm::task::start_kernel_task;
+            extern crate alloc;
+            use alloc::string::String;
+
+            // Start request processing on this CPU if required.
+            if SVSM_PLATFORM.start_svsm_request_loop() {
+                start_kernel_task(
+                    KernelThreadStartInfo::new(request_loop_start, 0),
+                    String::from("request-loop on CPU 0"),
+                )
+                .expect("Failed to launch request loop task");
+            }
         }
     }
 }

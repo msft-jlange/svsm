@@ -4,6 +4,7 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+#[cfg(feature = "svsm")]
 pub mod apic;
 pub mod control_regs;
 pub mod cpuid;
@@ -29,7 +30,6 @@ pub mod vc;
 pub mod vmsa;
 pub mod x86;
 
-pub use apic::LocalApic;
 pub use idt::common::X86ExceptionContext;
 pub use irq_state::{IrqGuard, IrqState, TprGuard, irqs_disabled, irqs_enabled};
 pub use percpu::{irq_nesting_count, irqs_disable, irqs_enable, lower_tpr, raise_tpr};
