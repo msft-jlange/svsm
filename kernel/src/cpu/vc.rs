@@ -198,12 +198,8 @@ fn handle_msr(
     ins: DecodedInsn,
 ) -> Result<(), SvsmError> {
     match ins {
-        DecodedInsn::Wrmsr => {
-            ghcb.wrmsr_regs(&ctx.regs)
-        }
-        DecodedInsn::Rdmsr => {
-            ghcb.rdmsr_regs(&mut ctx.regs)
-        }
+        DecodedInsn::Wrmsr => ghcb.wrmsr_regs(&ctx.regs),
+        DecodedInsn::Rdmsr => ghcb.rdmsr_regs(&mut ctx.regs),
         _ => Err(VcError::new(ctx, VcErrorType::DecodeFailed).into()),
     }
 }

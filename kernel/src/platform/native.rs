@@ -11,7 +11,6 @@ use super::{PageEncryptionMasks, PageStateChangeOp, PageValidateOp, Stage2Platfo
 use crate::address::{PhysAddr, VirtAddr};
 use crate::console::init_svsm_console;
 use crate::cpu::IrqGuard;
-use crate::cpu::apic::{ApicIcr, IcrMessageType};
 use crate::cpu::cpuid::CpuidResult;
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::msr::write_msr;
@@ -31,6 +30,8 @@ use crate::types::PAGE_SIZE;
 #[cfg(debug_assertions)]
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
+use cpuarch::x86apic::ApicIcr;
+use cpuarch::x86apic::IcrMessageType;
 
 use bootdefs::kernel_launch::ApStartContext;
 use bootdefs::kernel_launch::SIPI_STUB_GPA;

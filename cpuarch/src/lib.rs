@@ -5,3 +5,4 @@
 
 pub mod snp_cpuid;
 pub mod vmsa;
+pub mod x86apic;
