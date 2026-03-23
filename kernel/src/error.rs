@@ -126,6 +126,8 @@ pub enum SvsmError {
     Vc(VcError),
     /// The operation is not supported.
     NotSupported,
+    /// An invalid parameter was specified.
+    InvalidParameter,
     /// Generic errors related to APIC emulation.
     Apic(ApicError),
     /// Generic errors related to attestation handling.
