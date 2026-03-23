@@ -85,6 +85,7 @@ impl From<SvsmError> for SvsmReqError {
             SvsmError::Attestation(e) => Self::protocol(e as u64),
             SvsmError::InvalidParameter => Self::invalid_parameter(),
             SvsmError::InvalidFormat => Self::invalid_format(),
+            SvsmError::NotSupported => Self::invalid_request(),
             // Use a fatal error for now
             _ => Self::FatalError(err),
         }

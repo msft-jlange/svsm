@@ -130,6 +130,10 @@ pub enum SvsmError {
     InvalidParameter,
     /// A data object with an invalid format was specified.
     InvalidFormat,
+    /// An encrypted message could not be decrypted.
+    MessageDecryptionFailure,
+    /// Errors raised following an SNP guest request.
+    SnpGuestRequest(u32),
     /// Generic errors related to APIC emulation.
     Apic(ApicError),
     /// Generic errors related to attestation handling.
