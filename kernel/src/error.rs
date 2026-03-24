@@ -128,6 +128,8 @@ pub enum SvsmError {
     NotSupported,
     /// An invalid parameter was specified.
     InvalidParameter,
+    /// A data object with an invalid format was specified.
+    InvalidFormat,
     /// Generic errors related to APIC emulation.
     Apic(ApicError),
     /// Generic errors related to attestation handling.
