@@ -50,6 +50,8 @@ impl IgvmMeasure {
 /// Possible IGVM targets.
 #[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq)]
 enum IgvmTarget {
+    #[serde(rename = "no-hv")]
+    Neutral,
     #[serde(rename = "qemu")]
     Qemu,
     #[serde(rename = "hyper-v")]
@@ -59,11 +61,12 @@ enum IgvmTarget {
 }
 
 impl IgvmTarget {
-    fn as_arg(&self) -> &str {
+    fn as_arg(&self) -> Option<&str> {
         match self {
-            Self::Qemu => "qemu",
-            Self::HyperV => "hyper-v",
-            Self::Vanadium => "vanadium",
+            Self::Neutral => None,
+            Self::Qemu => Some("qemu"),
+            Self::HyperV => Some("hyper-v"),
+            Self::Vanadium => Some("vanadium"),
         }
     }
 }
@@ -149,7 +152,9 @@ impl IgvmTargetConfig {
         for plat in self.platforms.iter() {
             cmd.arg(plat.as_arg());
         }
-        cmd.arg(target.as_arg());
+        if let Some(t) = target.as_arg() {
+            cmd.arg(t);
+        }
         run_cmd_checked(cmd, args)?;
         Ok(output)
     }

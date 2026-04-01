@@ -16,8 +16,9 @@ use bootdefs::kernel_launch::CPUID_PAGE;
 use igvm_defs::PAGE_SIZE_4K;
 
 use crate::boot_params::BootParamLayout;
-use crate::cmd_options::{CmdOptions, Hypervisor};
+use crate::cmd_options::CmdOptions;
 use crate::firmware::Firmware;
+use crate::igvm_builder::Hypervisor;
 use crate::igvm_builder::{COMPATIBILITY_MASK, TDP_COMPATIBILITY_MASK};
 
 pub const LOWMEM_PT_START: u64 = 0x10000;
@@ -96,6 +97,7 @@ pub struct GpaMap {
 impl GpaMap {
     pub fn new(
         options: &CmdOptions,
+        hypervisor: Hypervisor,
         firmware: &Option<Box<dyn Firmware>>,
     ) -> Result<Self, Box<dyn Error>> {
         //   0x00D000-0x00EFFF: initial page tables for SIPI stub
@@ -124,12 +126,12 @@ impl GpaMap {
         };
 
         // Choose the kernel base and maximum size.
-        let (kernel_base, kernel_max_size) = match options.hypervisor {
+        let (kernel_base, kernel_max_size) = match hypervisor {
             Hypervisor::Qemu => {
                 // Place the kernel area at 512 GB with a maximum size of 16 MB.
                 (0x0000008000000000, 0x01000000)
             }
-            Hypervisor::HyperV => {
+            Hypervisor::HyperV | Hypervisor::Neutral => {
                 // Place the kernel area at 64 MB with a maximum size of 16 MB.
                 (0x04000000, 0x01000000)
             }
@@ -193,12 +195,12 @@ impl GpaMap {
         // mark the end of the valid boot loader memory area.
         let kernel_fs = GpaRange::new(gpa_layout_info.kernel_fs_start, kernel_fs_len as u64)?;
 
-        let (vmsa, vmsa_in_kernel_range) = match options.hypervisor {
+        let (vmsa, vmsa_in_kernel_range) = match hypervisor {
             Hypervisor::Qemu | Hypervisor::Vanadium => {
                 // VMSA address is currently hardcoded in kvm
                 (GpaRange::new_page(0xFFFFFFFFF000)?, false)
             }
-            Hypervisor::HyperV => (
+            Hypervisor::HyperV | Hypervisor::Neutral => (
                 GpaRange::new_page(kernel_base + kernel_min_size - PAGE_SIZE_4K)?,
                 true,
             ),

@@ -4,7 +4,8 @@
 //
 // Author: Roy Hopkins <roy.hopkins@suse.com>
 
-use crate::cmd_options::{Hypervisor, SevExtraFeatures};
+use crate::cmd_options::SevExtraFeatures;
+use crate::igvm_builder::Hypervisor;
 use bootdefs::platform::SvsmPlatformType;
 use bootdefs::tdp_start::TdpStartContextLayout;
 use igvm::IgvmDirectiveHeader;

@@ -1,9 +1,9 @@
 {
     "igvm": {
-        "hyper-v": {
+        "no-hv": {
             "output": "coconut-osbuild.igvm",
             "platforms": [
-                "snp",
+		"snp",
                 "tdp",
                 "native"
             ],

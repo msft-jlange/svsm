@@ -30,7 +30,8 @@ use zerocopy::IntoBytes;
 
 use crate::GpaMap;
 use crate::boot_params::BootParamType;
-use crate::cmd_options::{CmdOptions, Hypervisor};
+use crate::cmd_options::CmdOptions;
+use crate::cmd_options::HypervisorArg;
 use crate::context::StartContextInfo;
 use crate::context::construct_native_start_context;
 use crate::context::construct_stage1_image;
@@ -65,6 +66,26 @@ const _: () = assert!(size_of::<BootParamBlock>() as u64 <= PAGE_SIZE_4K);
 const _: () = assert!(size_of::<InitialGuestContext>() as u64 <= PAGE_SIZE_4K);
 
 #[derive(Clone, Copy, Debug)]
+pub enum Hypervisor {
+    Neutral,
+    Qemu,
+    HyperV,
+    Vanadium,
+}
+
+impl From<Option<HypervisorArg>> for Hypervisor {
+    fn from(a: Option<HypervisorArg>) -> Self {
+        match a {
+            Some(h) => match h {
+                HypervisorArg::Qemu => Self::Qemu,
+                HypervisorArg::HyperV => Self::HyperV,
+                HypervisorArg::Vanadium => Self::Vanadium,
+            },
+            None => Self::Neutral,
+        }
+    }
+}
+
 struct ImageLayout {
     cpuid_addr: u64,
     boot_params_gpa: u64,
@@ -73,6 +94,7 @@ struct ImageLayout {
 
 pub struct IgvmBuilder {
     options: CmdOptions,
+    hypervisor: Hypervisor,
     use_igvm_v2: bool,
     firmware: Option<Box<dyn Firmware>>,
     gpa_map: GpaMap,
@@ -112,26 +134,28 @@ impl IgvmBuilder {
             return Err("No platform specified".into());
         }
 
+        let hypervisor = Hypervisor::from(options.hypervisor);
+
         let firmware = match options.firmware {
             Some(_) => Some(parse_firmware(
                 &options,
+                hypervisor,
                 IGVM_PARAMETER_COUNT,
                 COMPATIBILITY_MASK.get(),
             )?),
             None => None,
         };
-        let gpa_map = GpaMap::new(&options, &firmware)?;
+        let gpa_map = GpaMap::new(&options, hypervisor, &firmware)?;
         let vtom = if let Some(fw) = &firmware {
             fw.get_vtom()
         } else {
-            match options.hypervisor {
-                Hypervisor::Qemu => 0,
+            match hypervisor {
                 Hypervisor::HyperV => {
                     // Set the shared GPA boundary at bit 46, below the lowest possible
                     // C-bit position.
                     0x0000400000000000
                 }
-                Hypervisor::Vanadium => 0,
+                _ => 0,
             }
         };
         Ok(Self {
@@ -139,6 +163,7 @@ impl IgvmBuilder {
             firmware,
             gpa_map,
             vtom,
+            hypervisor,
             platforms: vec![],
             initialization: vec![],
             directives: vec![],
@@ -226,22 +251,22 @@ impl IgvmBuilder {
             GuestFwInfoBlock::default()
         };
 
-        let suppress_svsm_interrupts_on_snp = match self.options.hypervisor {
+        let suppress_svsm_interrupts_on_snp = match self.hypervisor {
             Hypervisor::Qemu | Hypervisor::Vanadium => 1,
             _ => 0,
         };
 
-        let has_qemu_testdev = match self.options.hypervisor {
+        let has_qemu_testdev = match self.hypervisor {
             Hypervisor::Qemu | Hypervisor::Vanadium => 1,
             _ => 0,
         };
 
-        let has_fw_cfg_port = match self.options.hypervisor {
+        let has_fw_cfg_port = match self.hypervisor {
             Hypervisor::Qemu | Hypervisor::Vanadium => 1,
             _ => 0,
         };
 
-        let has_test_iorequests = match self.options.hypervisor {
+        let has_test_iorequests = match self.hypervisor {
             Hypervisor::Qemu => 1,
             _ => 0,
         };
@@ -563,7 +588,7 @@ impl IgvmBuilder {
                 vtom,
                 SNP_COMPATIBILITY_MASK,
                 &self.options.sev_features,
-                self.options.hypervisor,
+                self.hypervisor,
             ));
         }
 

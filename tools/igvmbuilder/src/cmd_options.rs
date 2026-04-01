@@ -38,7 +38,7 @@ pub struct CmdOptions {
 
     /// Hypervisor to generate IGVM file for
     #[arg(value_enum)]
-    pub hypervisor: Hypervisor,
+    pub hypervisor: Option<HypervisorArg>,
 
     /// Print verbose output
     #[arg(short, long, default_value_t = false)]
@@ -94,7 +94,7 @@ impl CmdOptions {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
-pub enum Hypervisor {
+pub enum HypervisorArg {
     /// Build an IGVM file compatible with QEMU
     Qemu,
 
