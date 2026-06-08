@@ -46,11 +46,11 @@ use crate::mm::virt_to_phys;
 #[cfg(test)]
 use bootdefs::platform::SvsmPlatformType;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct NativePlatform {}
 
 impl NativePlatform {
-    pub fn new(_suppress_svsm_interrupts: bool) -> Self {
+    pub fn new() -> Self {
         // Execution is not possible unless X2APIC is supported.
         if !cpu_has_feat(Feature::X2Apic) {
             panic!("X2APIC is not supported");
@@ -204,10 +204,6 @@ impl SvsmPlatform for NativePlatform {
 
     fn query_apic_registration_state(&self) -> bool {
         false
-    }
-
-    fn use_interrupts(&self) -> bool {
-        true
     }
 
     fn is_external_interrupt(&self, _vector: usize) -> bool {
