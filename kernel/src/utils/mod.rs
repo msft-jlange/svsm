@@ -4,6 +4,7 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+pub mod atomic_bitmap;
 pub mod bitmap_allocator;
 pub mod immut_after_init;
 pub mod memory_region;
@@ -12,6 +13,7 @@ pub mod tcb_ptr;
 pub mod util;
 pub mod vec;
 
+pub use atomic_bitmap::AtomicBitmap;
 pub use memory_region::MemoryRegion;
 pub use scoped::{ScopedMut, ScopedRef};
 pub use util::{
